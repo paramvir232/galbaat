@@ -1,0 +1,17 @@
+{
+  "name": "GalBaat",
+  "short_name": "GalBaat",
+  "description": "Push-to-talk rooms with voice and chat.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0c111d",
+  "theme_color": "#0c111d",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "128x128",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
