@@ -28,11 +28,18 @@ export default function RoomPage() {
   const [error, setError] = useState("");
   const [speaking, setSpeaking] = useState(false);
   const [muted, setMuted] = useState(false);
+  const [micLocked, setMicLocked] = useState(false);
   const [mobilePanel, setMobilePanel] = useState(null);
   const speakingRef = useRef(false);
+  const micLockedRef = useRef(false);
   const joinedRef = useRef(false);
 
-  const stopTalking = useCallback(() => {
+  const stopTalking = useCallback((force = false) => {
+    if (micLockedRef.current && !force) return;
+    if (force) {
+      micLockedRef.current = false;
+      setMicLocked(false);
+    }
     if (!speakingRef.current) return;
     speakingRef.current = false;
     setSpeaking(false);
@@ -52,6 +59,17 @@ export default function RoomPage() {
       setError("Microphone permission is required before you can talk.");
     }
   }, [ensureMedia, muted, roomId, setTrackEnabled, socket]);
+
+  const toggleMicLock = useCallback(async () => {
+    if (muted || !connected) return;
+    if (micLockedRef.current) {
+      stopTalking(true);
+      return;
+    }
+    await startTalking();
+    micLockedRef.current = true;
+    setMicLocked(true);
+  }, [connected, muted, startTalking, stopTalking]);
 
   useEffect(() => {
     joinedRef.current = false;
@@ -105,7 +123,7 @@ export default function RoomPage() {
       setConnected(false);
       joinedRef.current = false;
       setStatus("reconnecting");
-      stopTalking();
+      stopTalking(true);
     }
     function onParticipantsUpdate(next) {
       setParticipants(next);
@@ -196,7 +214,7 @@ export default function RoomPage() {
   function toggleMute() {
     const next = !muted;
     setMuted(next);
-    if (next) stopTalking();
+    if (next) stopTalking(true);
     socket.emit("participant:mute", { roomId, muted: next });
   }
 
@@ -253,10 +271,12 @@ export default function RoomPage() {
 
           <PushToTalk
             active={speaking}
+            locked={micLocked}
             muted={muted}
             disabled={!connected}
             onStart={startTalking}
             onStop={stopTalking}
+            onToggleLock={toggleMicLock}
             onToggleMute={toggleMute}
           />
 
