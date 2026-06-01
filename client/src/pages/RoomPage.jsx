@@ -222,7 +222,7 @@ export default function RoomPage() {
   const typingUsers = Object.values(typing);
 
   return (
-    <main className="flex h-screen min-h-[680px] flex-col p-3 text-slate-100 sm:p-4">
+    <main className="flex h-dvh min-h-0 flex-col overflow-hidden p-3 text-slate-100 sm:p-4">
       <header className="glass mb-3 flex shrink-0 flex-wrap items-center justify-between gap-3 rounded-lg px-4 py-3">
         <div className="flex min-w-0 items-center gap-3">
           <Link to="/" className="grid h-10 w-10 shrink-0 place-items-center rounded-md border border-line bg-white/[0.04] text-slate-300 hover:bg-white/10">
@@ -252,8 +252,8 @@ export default function RoomPage() {
         </div>
       </header>
 
-      <section className="grid min-h-0 flex-1 gap-3 md:grid-cols-[270px_minmax(0,1fr)_340px]">
-        <div className={`${mobilePanel === "participants" || !mobilePanel ? "block" : "hidden"} min-h-0 md:block`}>
+      <section className="grid min-h-0 flex-1 gap-3 overflow-hidden md:grid-cols-[270px_minmax(0,1fr)_340px]">
+        <div className={`${mobilePanel === "participants" || !mobilePanel ? "block" : "hidden"} min-h-0 overflow-hidden md:block`}>
           <ParticipantList participants={participants} selfId={self?.id} />
         </div>
 
@@ -287,7 +287,7 @@ export default function RoomPage() {
           )}
         </motion.div>
 
-        <div className={`${mobilePanel === "chat" || !mobilePanel ? "block" : "hidden"} min-h-0 md:block`}>
+        <div className={`${mobilePanel === "chat" || !mobilePanel ? "block" : "hidden"} min-h-0 overflow-hidden md:block`}>
           <ChatPanel
             messages={messages}
             typingUsers={typingUsers}

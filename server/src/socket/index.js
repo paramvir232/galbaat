@@ -1,5 +1,5 @@
 import { Message } from "../models/Message.js";
-import { findRoom, touchRoom } from "../services/roomService.js";
+import { deleteRoom, findRoom, touchRoom } from "../services/roomService.js";
 import { cleanText, cleanUsername } from "../utils/sanitize.js";
 
 const rooms = new Map();
@@ -40,8 +40,12 @@ async function leaveCurrentRoom(io, socket) {
   });
   socket.to(currentRoomId).emit("webrtc:peer-left", { id: socket.id });
   const count = emitParticipants(io, currentRoomId).length;
+  if (count === 0) {
+    rooms.delete(currentRoomId);
+    await deleteRoom(currentRoomId);
+    return;
+  }
   await touchRoom(currentRoomId, count);
-  if (count === 0) rooms.delete(currentRoomId);
 }
 
 export function registerSocketHandlers(io) {

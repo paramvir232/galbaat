@@ -32,6 +32,12 @@ export async function touchRoom(id, activeUsers) {
   );
 }
 
+export async function deleteRoom(roomId) {
+  await Message.deleteMany({ roomId });
+  const result = await Room.deleteOne({ roomId });
+  return result.deletedCount || 0;
+}
+
 export async function cleanupInactiveRooms() {
   const cutoff = new Date(Date.now() - INACTIVE_ROOM_MS);
   const staleRooms = await Room.find({
