@@ -16,6 +16,7 @@ export default [
         navigator: "readonly",
         localStorage: "readonly",
         fetch: "readonly",
+        FormData: "readonly",
         self: "readonly",
         caches: "readonly",
         Audio: "readonly",

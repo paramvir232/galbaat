@@ -7,7 +7,7 @@ import ParticipantList from "../components/ParticipantList.jsx";
 import PushToTalk from "../components/PushToTalk.jsx";
 import ShareRoom from "../components/ShareRoom.jsx";
 import StatusPill from "../components/StatusPill.jsx";
-import { getMessages, getRoom } from "../lib/api.js";
+import { getFiles, getMessages, getRoom, uploadRoomFile } from "../lib/api.js";
 import { getGuestName } from "../lib/guest.js";
 import { useSocket } from "../hooks/useSocket.js";
 import { useWebRtcRoom } from "../hooks/useWebRtcRoom.js";
@@ -22,6 +22,7 @@ export default function RoomPage() {
   const [self, setSelf] = useState(null);
   const [participants, setParticipants] = useState([]);
   const [messages, setMessages] = useState([]);
+  const [files, setFiles] = useState([]);
   const [typing, setTyping] = useState({});
   const [status, setStatus] = useState("connecting");
   const [connected, setConnected] = useState(socket.connected);
@@ -29,6 +30,7 @@ export default function RoomPage() {
   const [speaking, setSpeaking] = useState(false);
   const [muted, setMuted] = useState(false);
   const [micLocked, setMicLocked] = useState(false);
+  const [fileUploading, setFileUploading] = useState(false);
   const [mobilePanel, setMobilePanel] = useState(null);
   const speakingRef = useRef(false);
   const micLockedRef = useRef(false);
@@ -76,12 +78,18 @@ export default function RoomPage() {
     setSelf(null);
     setParticipants([]);
     setTyping({});
+    setFiles([]);
 
     async function loadRoom() {
       try {
-        const [{ room: loadedRoom }, { messages: history }] = await Promise.all([getRoom(roomId), getMessages(roomId)]);
+        const [{ room: loadedRoom }, { messages: history }, { files: roomFiles }] = await Promise.all([
+          getRoom(roomId),
+          getMessages(roomId),
+          getFiles(roomId)
+        ]);
         setRoom(loadedRoom);
         setMessages(history);
+        setFiles(roomFiles);
       } catch (err) {
         setError(err.message);
         window.setTimeout(() => navigate("/"), 1400);
@@ -153,6 +161,9 @@ export default function RoomPage() {
     function onChat(message) {
       setMessages((current) => [...current, message]);
     }
+    function onFileUploaded(file) {
+      setFiles((current) => (current.some((item) => item.id === file.id) ? current : [...current, file]));
+    }
     function onTypingStart(user) {
       if (user.id === self?.id) return;
       setTyping((current) => ({ ...current, [user.id]: user.username }));
@@ -171,6 +182,7 @@ export default function RoomPage() {
     socket.on("participant:joined", onJoined);
     socket.on("participant:left", onLeft);
     socket.on("chat:message", onChat);
+    socket.on("file:uploaded", onFileUploaded);
     socket.on("typing:start", onTypingStart);
     socket.on("typing:stop", onTypingStop);
     setConnected(socket.connected);
@@ -182,6 +194,7 @@ export default function RoomPage() {
       socket.off("participant:joined", onJoined);
       socket.off("participant:left", onLeft);
       socket.off("chat:message", onChat);
+      socket.off("file:uploaded", onFileUploaded);
       socket.off("typing:start", onTypingStart);
       socket.off("typing:stop", onTypingStop);
     };
@@ -209,6 +222,19 @@ export default function RoomPage() {
 
   function sendMessage(message) {
     socket.emit("chat:message", { roomId, message });
+  }
+
+  async function uploadFile(file) {
+    setFileUploading(true);
+    setError("");
+    try {
+      const { file: uploaded } = await uploadRoomFile(roomId, file, getGuestName());
+      setFiles((current) => (current.some((item) => item.id === uploaded.id) ? current : [...current, uploaded]));
+    } catch (err) {
+      setError(err.message || "Upload failed");
+    } finally {
+      setFileUploading(false);
+    }
   }
 
   function toggleMute() {
@@ -290,8 +316,11 @@ export default function RoomPage() {
         <div className={`${mobilePanel === "chat" || !mobilePanel ? "block" : "hidden"} min-h-0 overflow-hidden md:block`}>
           <ChatPanel
             messages={messages}
+            files={files}
             typingUsers={typingUsers}
+            fileUploading={fileUploading}
             onSend={sendMessage}
+            onUploadFile={uploadFile}
             onTypingStart={() => socket.emit("typing:start", { roomId })}
             onTypingStop={() => socket.emit("typing:stop", { roomId })}
           />

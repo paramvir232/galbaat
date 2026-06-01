@@ -64,6 +64,7 @@ const io = new Server(server, {
   pingInterval: 10_000
 });
 
+app.set("io", io);
 registerSocketHandlers(io);
 
 await connectDb();

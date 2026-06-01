@@ -2,6 +2,7 @@ import { customAlphabet } from "nanoid";
 import { Room } from "../models/Room.js";
 import { Message } from "../models/Message.js";
 import { cleanRoomName } from "../utils/sanitize.js";
+import { deleteRoomUploads } from "./fileService.js";
 
 const roomId = customAlphabet("ABCDEFGHJKLMNPQRSTUVWXYZ23456789", 7);
 const INACTIVE_ROOM_MS = 1000 * 60 * 60 * 6;
@@ -34,6 +35,7 @@ export async function touchRoom(id, activeUsers) {
 
 export async function deleteRoom(roomId) {
   await Message.deleteMany({ roomId });
+  await deleteRoomUploads(roomId);
   const result = await Room.deleteOne({ roomId });
   return result.deletedCount || 0;
 }
@@ -49,6 +51,7 @@ export async function cleanupInactiveRooms() {
   if (!ids.length) return 0;
 
   await Message.deleteMany({ roomId: { $in: ids } });
+  await Promise.all(ids.map((id) => deleteRoomUploads(id)));
   const result = await Room.deleteMany({ roomId: { $in: ids } });
   return result.deletedCount || 0;
 }

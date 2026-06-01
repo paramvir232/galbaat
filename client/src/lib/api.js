@@ -25,3 +25,28 @@ export function getRoom(roomId) {
 export function getMessages(roomId) {
   return request(`/api/rooms/${encodeURIComponent(roomId)}/messages`);
 }
+
+export function getFiles(roomId) {
+  return request(`/api/rooms/${encodeURIComponent(roomId)}/files`);
+}
+
+export async function uploadRoomFile(roomId, file, username) {
+  const body = new FormData();
+  body.append("file", file);
+  body.append("username", username);
+
+  const res = await fetch(`${API_URL}/api/rooms/${encodeURIComponent(roomId)}/files`, {
+    method: "POST",
+    body
+  });
+
+  const payload = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(payload.message || "Upload failed");
+  return payload;
+}
+
+export function apiAssetUrl(path) {
+  if (!path) return "#";
+  if (/^https?:\/\//i.test(path)) return path;
+  return `${API_URL}${path}`;
+}

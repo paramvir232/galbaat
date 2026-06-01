@@ -1,14 +1,23 @@
 import { useEffect, useRef, useState } from "react";
 import DOMPurify from "dompurify";
-import { Send, Smile } from "lucide-react";
+import { Download, File, Loader2, Send, Smile, Upload } from "lucide-react";
+import { apiAssetUrl } from "../lib/api";
 import { formatTime } from "../lib/time";
 
 const EMOJIS = ["😀", "😂", "🔥", "🙌", "👋", "✅", "🎧", "🚀", "❤️"];
 
-export default function ChatPanel({ messages, typingUsers, onSend, onTypingStart, onTypingStop }) {
+function formatBytes(value) {
+  if (!Number.isFinite(value)) return "";
+  if (value < 1024) return `${value} B`;
+  if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`;
+  return `${(value / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+export default function ChatPanel({ messages, files, typingUsers, fileUploading, onSend, onUploadFile, onTypingStart, onTypingStop }) {
   const [value, setValue] = useState("");
   const [showEmojis, setShowEmojis] = useState(false);
   const endRef = useRef(null);
+  const fileInputRef = useRef(null);
   const typingTimer = useRef(null);
 
   useEffect(() => {
@@ -32,6 +41,12 @@ export default function ChatPanel({ messages, typingUsers, onSend, onTypingStart
     onTypingStop();
   }
 
+  function handleFileChange(event) {
+    const [file] = event.target.files || [];
+    if (file) onUploadFile(file);
+    event.target.value = "";
+  }
+
   return (
     <aside className="glass flex h-full min-h-0 flex-col overflow-hidden rounded-lg">
       <div className="shrink-0 border-b border-line p-4">
@@ -39,6 +54,46 @@ export default function ChatPanel({ messages, typingUsers, onSend, onTypingStart
         <p className="mt-1 min-h-4 text-xs text-slate-400">
           {typingUsers.length ? `${typingUsers.join(", ")} typing...` : "Messages sync for everyone here"}
         </p>
+      </div>
+
+      <div className="shrink-0 border-b border-line p-3">
+        <div className="mb-2 flex items-center justify-between gap-2">
+          <span className="text-xs font-semibold uppercase text-slate-400">Shared Files</span>
+          <button
+            type="button"
+            onClick={() => fileInputRef.current?.click()}
+            disabled={fileUploading}
+            className="inline-flex items-center gap-2 rounded-md border border-line bg-white/[0.05] px-3 py-2 text-xs font-medium text-slate-200 hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {fileUploading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Upload className="h-3.5 w-3.5" />}
+            Upload
+          </button>
+          <input ref={fileInputRef} type="file" className="hidden" onChange={handleFileChange} />
+        </div>
+
+        <div className="scrollbar-thin max-h-32 space-y-2 overflow-y-auto pr-1">
+          {files.length === 0 ? (
+            <p className="rounded-md border border-dashed border-line px-3 py-2 text-xs text-slate-500">No files shared yet</p>
+          ) : (
+            files.map((file) => (
+              <a
+                key={file.id}
+                href={apiAssetUrl(file.downloadUrl)}
+                download
+                className="flex items-center gap-3 rounded-md border border-line bg-white/[0.04] p-2 text-slate-200 hover:bg-white/[0.08]"
+              >
+                <File className="h-4 w-4 shrink-0 text-skyglass" />
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-xs font-medium">{file.originalName}</span>
+                  <span className="block text-[11px] text-slate-500">
+                    {formatBytes(file.size)} by {file.username}
+                  </span>
+                </span>
+                <Download className="h-4 w-4 shrink-0 text-slate-400" />
+              </a>
+            ))
+          )}
+        </div>
       </div>
 
       <div className="scrollbar-thin min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain p-4">
