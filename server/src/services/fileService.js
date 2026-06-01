@@ -120,6 +120,7 @@ export function publicFile(file) {
     size: file.size,
     username: file.username,
     uploadedAt: file.uploadedAt,
+    previewUrl: `/api/rooms/${encodeURIComponent(file.roomId)}/files/${encodeURIComponent(file.id)}/preview`,
     downloadUrl: `/api/rooms/${encodeURIComponent(file.roomId)}/files/${encodeURIComponent(file.id)}/download`
   };
 }

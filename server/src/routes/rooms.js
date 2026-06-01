@@ -85,3 +85,16 @@ roomsRouter.get("/:roomId/files/:fileId/download", ensureRoom, async (req, res, 
     next(error);
   }
 });
+
+roomsRouter.get("/:roomId/files/:fileId/preview", ensureRoom, async (req, res, next) => {
+  try {
+    const file = await getRoomFile(req.roomId, req.params.fileId);
+    if (!file) return res.status(404).json({ message: "File not found" });
+    res.setHeader("Content-Type", file.mimeType || "application/octet-stream");
+    res.setHeader("Content-Length", file.size);
+    res.setHeader("Content-Disposition", `inline; filename="${encodeURIComponent(file.originalName)}"`);
+    file.stream.pipe(res);
+  } catch (error) {
+    next(error);
+  }
+});

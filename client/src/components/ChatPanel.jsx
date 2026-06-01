@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import DOMPurify from "dompurify";
-import { Download, File, Loader2, Send, Smile, Upload } from "lucide-react";
+import { Download, Eye, File, Loader2, Send, Smile, Upload } from "lucide-react";
 import { apiAssetUrl } from "../lib/api";
 import { formatTime } from "../lib/time";
 
@@ -76,12 +76,7 @@ export default function ChatPanel({ messages, files, typingUsers, fileUploading,
             <p className="rounded-md border border-dashed border-line px-3 py-2 text-xs text-slate-500">No files shared yet</p>
           ) : (
             files.map((file) => (
-              <a
-                key={file.id}
-                href={apiAssetUrl(file.downloadUrl)}
-                download
-                className="flex items-center gap-3 rounded-md border border-line bg-white/[0.04] p-2 text-slate-200 hover:bg-white/[0.08]"
-              >
+              <div key={file.id} className="flex items-center gap-2 rounded-md border border-line bg-white/[0.04] p-2 text-slate-200">
                 <File className="h-4 w-4 shrink-0 text-skyglass" />
                 <span className="min-w-0 flex-1">
                   <span className="block truncate text-xs font-medium">{file.originalName}</span>
@@ -89,8 +84,24 @@ export default function ChatPanel({ messages, files, typingUsers, fileUploading,
                     {formatBytes(file.size)} by {file.username}
                   </span>
                 </span>
-                <Download className="h-4 w-4 shrink-0 text-slate-400" />
-              </a>
+                <a
+                  href={apiAssetUrl(file.previewUrl)}
+                  target="_blank"
+                  rel="noreferrer"
+                  title="Open file"
+                  className="grid h-8 w-8 shrink-0 place-items-center rounded-md text-slate-400 hover:bg-white/10 hover:text-slate-100"
+                >
+                  <Eye className="h-4 w-4" />
+                </a>
+                <a
+                  href={apiAssetUrl(file.downloadUrl)}
+                  download
+                  title="Download file"
+                  className="grid h-8 w-8 shrink-0 place-items-center rounded-md text-slate-400 hover:bg-white/10 hover:text-slate-100"
+                >
+                  <Download className="h-4 w-4" />
+                </a>
+              </div>
             ))
           )}
         </div>
