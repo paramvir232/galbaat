@@ -15,6 +15,7 @@ function publicUser(user) {
     username: user.username,
     speaking: user.speaking,
     muted: user.muted,
+    video: user.video,
     joinedAt: user.joinedAt
   };
 }
@@ -79,6 +80,7 @@ export function registerSocketHandlers(io) {
           username: cleanUsername(username),
           speaking: false,
           muted: false,
+          video: false,
           joinedAt: new Date().toISOString()
         };
 
@@ -162,6 +164,14 @@ export function registerSocketHandlers(io) {
       const user = rooms.get(normalizedRoomId)?.get(socket.id);
       if (!user) return;
       user.muted = Boolean(muted);
+      emitParticipants(io, normalizedRoomId);
+    });
+
+    socket.on("participant:video", ({ roomId, video }) => {
+      const normalizedRoomId = String(roomId || socket.data.roomId || "").toUpperCase();
+      const user = rooms.get(normalizedRoomId)?.get(socket.id);
+      if (!user) return;
+      user.video = Boolean(video);
       emitParticipants(io, normalizedRoomId);
     });
 

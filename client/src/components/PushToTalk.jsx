@@ -1,7 +1,7 @@
 import { motion } from "framer-motion";
 import { Lock, Mic, MicOff, Radio, Unlock } from "lucide-react";
 
-export default function PushToTalk({ active, locked, muted, disabled, onStart, onStop, onToggleLock, onToggleMute }) {
+export default function PushToTalk({ active, compact, locked, muted, disabled, onStart, onStop, onToggleLock, onToggleMute }) {
   const lockDisabled = disabled || muted;
 
   return (
@@ -23,7 +23,7 @@ export default function PushToTalk({ active, locked, muted, disabled, onStart, o
         animate={{
           boxShadow: active ? "0 0 0 16px rgba(41,211,167,0.08), 0 0 70px rgba(41,211,167,0.35)" : "0 0 36px rgba(138,180,255,0.12)"
         }}
-        className={`grid aspect-square w-[min(58vw,280px)] max-w-full place-items-center rounded-full border text-center transition ${
+        className={`grid aspect-square ${compact ? "w-[min(42vw,160px)]" : "w-[min(58vw,280px)]"} max-w-full place-items-center rounded-full border text-center transition ${
           active
             ? "border-mint bg-mint text-ink"
             : "border-line bg-white/[0.06] text-slate-100 hover:border-skyglass/60 hover:bg-white/[0.09]"
@@ -31,8 +31,8 @@ export default function PushToTalk({ active, locked, muted, disabled, onStart, o
         aria-label="Hold to talk"
       >
         <span className="flex flex-col items-center gap-3">
-          {active ? <Radio className="h-14 w-14" /> : <Mic className="h-14 w-14" />}
-          <span className="text-lg font-bold">{locked ? "Mic Locked" : active ? "Talking" : "Hold to Talk"}</span>
+          {active ? <Radio className={compact ? "h-8 w-8" : "h-14 w-14"} /> : <Mic className={compact ? "h-8 w-8" : "h-14 w-14"} />}
+          <span className={`${compact ? "text-sm" : "text-lg"} font-bold`}>{locked ? "Mic Locked" : active ? "Talking" : "Hold to Talk"}</span>
           <span className="text-xs opacity-70">{locked ? "Tap unlock to stop" : "Spacebar works too"}</span>
         </span>
       </motion.button>

@@ -1,4 +1,4 @@
-import { Mic, MicOff, Radio, Signal } from "lucide-react";
+import { Mic, MicOff, Radio, Signal, Video } from "lucide-react";
 import { motion } from "framer-motion";
 
 export default function ParticipantList({ participants, selfId }) {
@@ -30,7 +30,10 @@ export default function ParticipantList({ participants, selfId }) {
               </div>
               <p className="text-xs text-slate-400">{user.speaking ? "Speaking now" : "Online"}</p>
             </div>
-            {user.muted ? <MicOff className="h-4 w-4 text-slate-500" /> : <Mic className="h-4 w-4 text-slate-400" />}
+            <div className="flex items-center gap-2">
+              {user.video && <Video className="h-4 w-4 text-skyglass" />}
+              {user.muted ? <MicOff className="h-4 w-4 text-slate-500" /> : <Mic className="h-4 w-4 text-slate-400" />}
+            </div>
           </motion.div>
         ))}
       </div>

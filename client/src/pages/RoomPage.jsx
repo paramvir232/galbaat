@@ -1,12 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { motion } from "framer-motion";
-import { ArrowLeft, Hash, Menu, Radio, Wifi, WifiOff, X } from "lucide-react";
+import { ArrowLeft, Hash, Loader2, Menu, Radio, Video, VideoOff, Wifi, WifiOff, X } from "lucide-react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import ChatPanel from "../components/ChatPanel.jsx";
 import ParticipantList from "../components/ParticipantList.jsx";
 import PushToTalk from "../components/PushToTalk.jsx";
 import ShareRoom from "../components/ShareRoom.jsx";
 import StatusPill from "../components/StatusPill.jsx";
+import VideoGrid from "../components/VideoGrid.jsx";
 import { getFiles, getMessages, getRoom, uploadRoomFile } from "../lib/api.js";
 import { getGuestName } from "../lib/guest.js";
 import { useSocket } from "../hooks/useSocket.js";
@@ -17,7 +18,18 @@ export default function RoomPage() {
   const roomId = useMemo(() => String(routeRoomId || "").toUpperCase(), [routeRoomId]);
   const navigate = useNavigate();
   const socket = useSocket();
-  const { ensureMedia, connectToPeers, setTrackEnabled, audioEnabled, mediaError } = useWebRtcRoom(socket, roomId);
+  const {
+    ensureMedia,
+    connectToPeers,
+    setTrackEnabled,
+    startVideo,
+    stopVideo,
+    audioEnabled,
+    videoEnabled,
+    localStream,
+    remoteStreams,
+    mediaError
+  } = useWebRtcRoom(socket, roomId);
   const [room, setRoom] = useState(null);
   const [self, setSelf] = useState(null);
   const [participants, setParticipants] = useState([]);
@@ -31,6 +43,7 @@ export default function RoomPage() {
   const [muted, setMuted] = useState(false);
   const [micLocked, setMicLocked] = useState(false);
   const [fileUploading, setFileUploading] = useState(false);
+  const [videoBusy, setVideoBusy] = useState(false);
   const [mobilePanel, setMobilePanel] = useState(null);
   const speakingRef = useRef(false);
   const micLockedRef = useRef(false);
@@ -132,6 +145,8 @@ export default function RoomPage() {
       joinedRef.current = false;
       setStatus("reconnecting");
       stopTalking(true);
+      stopVideo();
+      socket.emit("participant:video", { roomId, video: false });
     }
     function onParticipantsUpdate(next) {
       setParticipants(next);
@@ -198,7 +213,7 @@ export default function RoomPage() {
       socket.off("typing:start", onTypingStart);
       socket.off("typing:stop", onTypingStop);
     };
-  }, [room, self?.id, socket, stopTalking]);
+  }, [room, roomId, self?.id, socket, stopTalking, stopVideo]);
 
   useEffect(() => {
     function handleKeyDown(event) {
@@ -244,8 +259,28 @@ export default function RoomPage() {
     socket.emit("participant:mute", { roomId, muted: next });
   }
 
+  async function toggleVideo() {
+    if (!connected || videoBusy) return;
+    setVideoBusy(true);
+    setError("");
+    try {
+      if (videoEnabled) {
+        await stopVideo();
+        socket.emit("participant:video", { roomId, video: false });
+      } else {
+        await startVideo();
+        socket.emit("participant:video", { roomId, video: true });
+      }
+    } catch (err) {
+      setError(err.message || "Unable to toggle camera");
+    } finally {
+      setVideoBusy(false);
+    }
+  }
+
   const statusTone = status === "connected" ? "good" : status === "voice-limited" ? "warn" : "neutral";
   const typingUsers = Object.values(typing);
+  const hasVideo = videoEnabled || remoteStreams.some(({ stream }) => stream.getVideoTracks().some((track) => track.readyState === "live"));
 
   return (
     <main className="flex h-dvh min-h-0 flex-col overflow-hidden p-3 text-slate-100 sm:p-4">
@@ -283,8 +318,8 @@ export default function RoomPage() {
           <ParticipantList participants={participants} selfId={self?.id} />
         </div>
 
-        <motion.div layout className="glass flex min-h-[380px] flex-col items-center justify-center rounded-lg p-6">
-          <div className="mb-8 flex flex-wrap items-center justify-center gap-3">
+        <motion.div layout className="glass flex min-h-[380px] flex-col items-center justify-center gap-5 overflow-hidden rounded-lg p-4 sm:p-6">
+          <div className="flex flex-wrap items-center justify-center gap-3">
             <div className="inline-flex items-center gap-2 rounded-full border border-line bg-white/[0.04] px-4 py-2 text-sm text-slate-300">
               {connected ? <Wifi className="h-4 w-4 text-mint" /> : <WifiOff className="h-4 w-4 text-amberglow" />}
               {participants.length} online
@@ -293,10 +328,24 @@ export default function RoomPage() {
               <Radio className={`h-4 w-4 ${audioEnabled ? "text-mint" : "text-slate-500"}`} />
               {audioEnabled ? "Broadcasting" : "Listening"}
             </div>
+            <button
+              type="button"
+              disabled={!connected || videoBusy}
+              onClick={toggleVideo}
+              className={`inline-flex items-center gap-2 rounded-full border px-4 py-2 text-sm font-medium transition disabled:cursor-not-allowed disabled:opacity-60 ${
+                videoEnabled ? "border-mint/40 bg-mint/10 text-mint" : "border-line bg-white/[0.04] text-slate-300 hover:bg-white/10"
+              }`}
+            >
+              {videoBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : videoEnabled ? <Video className="h-4 w-4" /> : <VideoOff className="h-4 w-4" />}
+              {videoEnabled ? "Camera on" : "Camera off"}
+            </button>
           </div>
+
+          {hasVideo && <VideoGrid localStream={localStream} remoteStreams={remoteStreams} participants={participants} selfId={self?.id} />}
 
           <PushToTalk
             active={speaking}
+            compact={hasVideo}
             locked={micLocked}
             muted={muted}
             disabled={!connected}

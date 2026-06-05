@@ -20,6 +20,7 @@ export default [
         self: "readonly",
         caches: "readonly",
         Audio: "readonly",
+        MediaStream: "readonly",
         RTCPeerConnection: "readonly",
         Element: "readonly"
       },
