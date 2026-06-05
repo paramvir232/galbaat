@@ -96,10 +96,21 @@ export function useWebRtcRoom(socket, roomId) {
       if (!videoTrack) return;
 
       stream.addTrack(videoTrack);
-      peersRef.current.forEach((pc) => pc.addTrack(videoTrack, stream));
+      let needsNegotiation = false;
+      await Promise.all(
+        [...peersRef.current.values()].map(async (pc) => {
+          const sender = pc.getSenders().find((item) => item.track?.kind === "video" || item.track === null);
+          if (sender) {
+            await sender.replaceTrack(videoTrack);
+            return;
+          }
+          pc.addTrack(videoTrack, stream);
+          needsNegotiation = true;
+        })
+      );
       setVideoEnabled(true);
       refreshLocalStreamState();
-      await renegotiateAllPeers();
+      if (needsNegotiation) await renegotiateAllPeers();
     } catch (error) {
       setMediaError("Camera permission is required for video.");
       throw error;
@@ -114,11 +125,14 @@ export function useWebRtcRoom(socket, roomId) {
       return;
     }
 
-    peersRef.current.forEach((pc) => {
-      pc.getSenders()
-        .filter((sender) => sender.track?.kind === "video")
-        .forEach((sender) => pc.removeTrack(sender));
-    });
+    await Promise.all(
+      [...peersRef.current.values()].flatMap((pc) =>
+        pc
+          .getSenders()
+          .filter((sender) => sender.track?.kind === "video")
+          .map((sender) => sender.replaceTrack(null))
+      )
+    );
 
     videoTracks.forEach((track) => {
       stream.removeTrack(track);
@@ -127,8 +141,7 @@ export function useWebRtcRoom(socket, roomId) {
 
     setVideoEnabled(false);
     refreshLocalStreamState();
-    await renegotiateAllPeers();
-  }, [refreshLocalStreamState, renegotiateAllPeers]);
+  }, [refreshLocalStreamState]);
 
   const createPeer = useCallback(
     async (peerId, initiator = false) => {

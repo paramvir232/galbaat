@@ -7,6 +7,7 @@ function VideoTile({ stream, label, muted = false, mirrored = false }) {
   useEffect(() => {
     if (!ref.current) return;
     ref.current.srcObject = stream || null;
+    ref.current.play().catch(() => {});
   }, [stream]);
 
   return (
