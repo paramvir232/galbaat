@@ -21,6 +21,7 @@ export default function RoomPage() {
   const {
     ensureMedia,
     connectToPeers,
+    syncPeers,
     setTrackEnabled,
     startVideo,
     stopVideo,
@@ -47,7 +48,12 @@ export default function RoomPage() {
   const [mobilePanel, setMobilePanel] = useState(null);
   const speakingRef = useRef(false);
   const micLockedRef = useRef(false);
+  const videoEnabledRef = useRef(false);
   const joinedRef = useRef(false);
+
+  useEffect(() => {
+    videoEnabledRef.current = videoEnabled;
+  }, [videoEnabled]);
 
   const stopTalking = useCallback((force = false) => {
     if (micLockedRef.current && !force) return;
@@ -125,15 +131,21 @@ export default function RoomPage() {
       setRoom(ack.room);
       setStatus("connected");
       try {
+        const peers = ack.peers || [];
+        syncPeers(peers.map((peer) => peer.id));
         await ensureMedia();
-        await connectToPeers(ack.peers || []);
+        await connectToPeers(peers);
+        if (speakingRef.current) {
+          socket.emit("ptt:speaking", { roomId, speaking: true });
+        }
+        if (videoEnabledRef.current) {
+          socket.emit("participant:video", { roomId, video: true });
+        }
       } catch {
         setStatus("voice-limited");
       }
     });
-
-    return () => stopTalking();
-  }, [connectToPeers, connected, ensureMedia, room, roomId, socket, stopTalking]);
+  }, [connectToPeers, connected, ensureMedia, room, roomId, socket, syncPeers]);
 
   useEffect(() => {
     function onConnect() {
@@ -144,9 +156,6 @@ export default function RoomPage() {
       setConnected(false);
       joinedRef.current = false;
       setStatus("reconnecting");
-      stopTalking(true);
-      stopVideo();
-      socket.emit("participant:video", { roomId, video: false });
     }
     function onParticipantsUpdate(next) {
       setParticipants(next);
@@ -213,7 +222,16 @@ export default function RoomPage() {
       socket.off("typing:start", onTypingStart);
       socket.off("typing:stop", onTypingStop);
     };
-  }, [room, roomId, self?.id, socket, stopTalking, stopVideo]);
+  }, [room, self?.id, socket]);
+
+  useEffect(() => {
+    if (!connected || !joinedRef.current) return undefined;
+    const heartbeat = window.setInterval(() => {
+      socket.emit("room:heartbeat", { roomId });
+    }, 20_000);
+    socket.emit("room:heartbeat", { roomId });
+    return () => window.clearInterval(heartbeat);
+  }, [connected, roomId, socket]);
 
   useEffect(() => {
     function handleKeyDown(event) {

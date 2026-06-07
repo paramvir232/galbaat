@@ -62,6 +62,39 @@ export function useWebRtcRoom(socket, roomId) {
     );
   }, []);
 
+  const removePeer = useCallback(
+    (peerId) => {
+      peersRef.current.get(peerId)?.close();
+      peersRef.current.delete(peerId);
+      pendingCandidatesRef.current.delete(peerId);
+      peerStreamsRef.current.delete(peerId);
+      const audio = audioRef.current.get(peerId);
+      if (audio) {
+        audio.pause();
+        audio.srcObject = null;
+        audio.remove();
+      }
+      audioRef.current.delete(peerId);
+      setPeerStates((current) => {
+        const next = { ...current };
+        delete next[peerId];
+        return next;
+      });
+      refreshRemoteStreamsState();
+    },
+    [refreshRemoteStreamsState]
+  );
+
+  const syncPeers = useCallback(
+    (activePeerIds) => {
+      const active = new Set(activePeerIds);
+      [...peersRef.current.keys()].forEach((peerId) => {
+        if (!active.has(peerId)) removePeer(peerId);
+      });
+    },
+    [removePeer]
+  );
+
   const renegotiatePeer = useCallback(
     async (peerId, pc) => {
       if (pc.signalingState !== "stable") return;
@@ -251,18 +284,7 @@ export function useWebRtcRoom(socket, roomId) {
     };
 
     const handlePeerLeft = ({ id }) => {
-      peersRef.current.get(id)?.close();
-      peersRef.current.delete(id);
-      pendingCandidatesRef.current.delete(id);
-      peerStreamsRef.current.delete(id);
-      refreshRemoteStreamsState();
-      audioRef.current.get(id)?.remove();
-      audioRef.current.delete(id);
-      setPeerStates((current) => {
-        const next = { ...current };
-        delete next[id];
-        return next;
-      });
+      removePeer(id);
     };
 
     socket.on("webrtc:offer", handleOffer);
@@ -276,7 +298,7 @@ export function useWebRtcRoom(socket, roomId) {
       socket.off("webrtc:ice-candidate", handleIce);
       socket.off("webrtc:peer-left", handlePeerLeft);
     };
-  }, [createPeer, refreshRemoteStreamsState, socket]);
+  }, [createPeer, removePeer, socket]);
 
   useEffect(() => {
     const peers = peersRef.current;
@@ -302,6 +324,7 @@ export function useWebRtcRoom(socket, roomId) {
   return {
     ensureMedia,
     connectToPeers,
+    syncPeers,
     setTrackEnabled,
     startVideo,
     stopVideo,

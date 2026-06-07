@@ -195,6 +195,7 @@ export function registerSocketHandlers(io) {
       if (!user) return;
       user.muted = Boolean(muted);
       emitParticipants(io, normalizedRoomId);
+      touchRoom(normalizedRoomId, rooms.get(normalizedRoomId).size).catch(() => {});
     });
 
     socket.on("participant:video", ({ roomId, video }) => {
@@ -203,6 +204,15 @@ export function registerSocketHandlers(io) {
       if (!user) return;
       user.video = Boolean(video);
       emitParticipants(io, normalizedRoomId);
+      touchRoom(normalizedRoomId, rooms.get(normalizedRoomId).size).catch(() => {});
+    });
+
+    socket.on("room:heartbeat", ({ roomId }) => {
+      const normalizedRoomId = String(roomId || socket.data.roomId || "").toUpperCase();
+      const userMap = rooms.get(normalizedRoomId);
+      if (!userMap?.has(socket.id)) return;
+      cancelEmptyRoomCleanup(normalizedRoomId);
+      touchRoom(normalizedRoomId, userMap.size).catch(() => {});
     });
 
     socket.on("webrtc:offer", ({ to, description }) => {
