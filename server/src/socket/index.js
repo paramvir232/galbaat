@@ -1,8 +1,10 @@
 import { Message } from "../models/Message.js";
+import { env } from "../config/env.js";
 import { deleteRoom, findRoom, touchRoom } from "../services/roomService.js";
 import { cleanText, cleanUsername } from "../utils/sanitize.js";
 
 const rooms = new Map();
+const emptyRoomTimers = new Map();
 
 function roomUsers(roomId) {
   if (!rooms.has(roomId)) rooms.set(roomId, new Map());
@@ -26,6 +28,33 @@ function emitParticipants(io, roomId) {
   return participants;
 }
 
+function cancelEmptyRoomCleanup(roomId) {
+  const timer = emptyRoomTimers.get(roomId);
+  if (!timer) return;
+  clearTimeout(timer);
+  emptyRoomTimers.delete(roomId);
+}
+
+async function scheduleEmptyRoomCleanup(roomId) {
+  cancelEmptyRoomCleanup(roomId);
+  await touchRoom(roomId, 0);
+
+  const timer = setTimeout(async () => {
+    try {
+      const users = rooms.get(roomId);
+      if (users?.size > 0) return;
+
+      rooms.delete(roomId);
+      emptyRoomTimers.delete(roomId);
+      await deleteRoom(roomId);
+    } catch (error) {
+      console.error(`Empty room cleanup failed for ${roomId}`, error);
+    }
+  }, env.emptyRoomGraceMs);
+
+  emptyRoomTimers.set(roomId, timer);
+}
+
 async function leaveCurrentRoom(io, socket) {
   const currentRoomId = socket.data.roomId;
   if (!currentRoomId || !rooms.has(currentRoomId)) return;
@@ -42,10 +71,10 @@ async function leaveCurrentRoom(io, socket) {
   socket.to(currentRoomId).emit("webrtc:peer-left", { id: socket.id });
   const count = emitParticipants(io, currentRoomId).length;
   if (count === 0) {
-    rooms.delete(currentRoomId);
-    await deleteRoom(currentRoomId);
+    await scheduleEmptyRoomCleanup(currentRoomId);
     return;
   }
+  cancelEmptyRoomCleanup(currentRoomId);
   await touchRoom(currentRoomId, count);
 }
 
@@ -61,6 +90,7 @@ export function registerSocketHandlers(io) {
         }
 
         const users = roomUsers(normalizedRoomId);
+        cancelEmptyRoomCleanup(normalizedRoomId);
         const existingUser = users.get(socket.id);
         if (socket.data.roomId === normalizedRoomId && existingUser) {
           const existingPeers = [...users.values()]

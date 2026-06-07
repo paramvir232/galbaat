@@ -60,8 +60,8 @@ app.use((err, _req, res, _next) => {
 const io = new Server(server, {
   cors: corsOptions,
   transports: ["websocket", "polling"],
-  pingTimeout: 20_000,
-  pingInterval: 10_000
+  pingTimeout: 60_000,
+  pingInterval: 25_000
 });
 
 app.set("io", io);
