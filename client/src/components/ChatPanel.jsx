@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState } from "react";
 import DOMPurify from "dompurify";
-import { Download, Eye, File, Loader2, Send, Smile, Upload } from "lucide-react";
+import { Download, Eye, File as FileIcon, Image, Loader2, Mic, Send, Smile, Square, Upload } from "lucide-react";
 import { apiAssetUrl } from "../lib/api";
 import { formatTime } from "../lib/time";
 
 const EMOJIS = ["😀", "😂", "🔥", "🙌", "👋", "✅", "🎧", "🚀", "❤️"];
+const REACTIONS = ["👍", "😂", "❤️", "🔥", "✅"];
 
 function formatBytes(value) {
   if (!Number.isFinite(value)) return "";
@@ -13,12 +14,37 @@ function formatBytes(value) {
   return `${(value / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-export default function ChatPanel({ messages, files, typingUsers, fileUploading, onSend, onUploadFile, onTypingStart, onTypingStop }) {
+function pastedImageName(file) {
+  const extension = file.type.split("/")[1]?.replace("jpeg", "jpg") || "png";
+  return `pasted-image-${new Date().toISOString().replace(/[:.]/g, "-")}.${extension}`;
+}
+
+function attachmentKind(file) {
+  if (file.mimeType?.startsWith("image/")) return "image";
+  if (file.mimeType?.startsWith("audio/")) return "audio";
+  return "file";
+}
+
+export default function ChatPanel({
+  messages,
+  files,
+  typingUsers,
+  fileUploading,
+  currentUsername,
+  onSend,
+  onUploadFile,
+  onReact,
+  onTypingStart,
+  onTypingStop
+}) {
   const [value, setValue] = useState("");
   const [showEmojis, setShowEmojis] = useState(false);
+  const [recording, setRecording] = useState(false);
   const endRef = useRef(null);
   const fileInputRef = useRef(null);
   const typingTimer = useRef(null);
+  const recorderRef = useRef(null);
+  const chunksRef = useRef([]);
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
@@ -45,6 +71,85 @@ export default function ChatPanel({ messages, files, typingUsers, fileUploading,
     const [file] = event.target.files || [];
     if (file) onUploadFile(file);
     event.target.value = "";
+  }
+
+  function handlePaste(event) {
+    const imageItem = [...(event.clipboardData?.items || [])].find((item) => item.kind === "file" && item.type.startsWith("image/"));
+    if (!imageItem || fileUploading) return;
+
+    const file = imageItem.getAsFile();
+    if (!file) return;
+
+    event.preventDefault();
+    const namedFile = new window.File([file], file.name || pastedImageName(file), {
+      type: file.type,
+      lastModified: file.lastModified || Date.now()
+    });
+    onUploadFile(namedFile);
+    setShowEmojis(false);
+  }
+
+  async function toggleRecording() {
+    if (recording) {
+      recorderRef.current?.stop();
+      return;
+    }
+
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+      chunksRef.current = [];
+      const recorder = new window.MediaRecorder(stream);
+      recorderRef.current = recorder;
+      recorder.ondataavailable = (event) => {
+        if (event.data.size) chunksRef.current.push(event.data);
+      };
+      recorder.onstop = () => {
+        stream.getTracks().forEach((track) => track.stop());
+        setRecording(false);
+        const blob = new window.Blob(chunksRef.current, { type: recorder.mimeType || "audio/webm" });
+        if (!blob.size) return;
+        const extension = blob.type.includes("mp4") ? "m4a" : "webm";
+        const file = new window.File([blob], `voice-note-${new Date().toISOString().replace(/[:.]/g, "-")}.${extension}`, {
+          type: blob.type || "audio/webm"
+        });
+        onUploadFile(file);
+      };
+      recorder.start();
+      setRecording(true);
+    } catch {
+      setRecording(false);
+    }
+  }
+
+  function renderAttachment(file) {
+    const kind = attachmentKind(file);
+    if (kind === "image") {
+      return (
+        <a href={apiAssetUrl(file.previewUrl)} target="_blank" rel="noreferrer" className="mt-3 block overflow-hidden rounded-md border border-line bg-ink/50">
+          <img src={apiAssetUrl(file.previewUrl)} alt={file.originalName} className="max-h-72 w-full object-contain" />
+        </a>
+      );
+    }
+
+    if (kind === "audio") {
+      return (
+        <audio controls className="mt-3 w-full">
+          <source src={apiAssetUrl(file.previewUrl)} type={file.mimeType} />
+        </audio>
+      );
+    }
+
+    return (
+      <a
+        href={apiAssetUrl(file.downloadUrl)}
+        download
+        className="mt-3 flex items-center gap-2 rounded-md border border-line bg-ink/50 px-3 py-2 text-sm text-slate-200 hover:bg-white/10"
+      >
+        <FileIcon className="h-4 w-4 text-skyglass" />
+        <span className="min-w-0 flex-1 truncate">{file.originalName}</span>
+        <span className="text-xs text-slate-500">{formatBytes(file.size)}</span>
+      </a>
+    );
   }
 
   return (
@@ -77,7 +182,11 @@ export default function ChatPanel({ messages, files, typingUsers, fileUploading,
           ) : (
             files.map((file) => (
               <div key={file.id} className="flex items-center gap-2 rounded-md border border-line bg-white/[0.04] p-2 text-slate-200">
-                <File className="h-4 w-4 shrink-0 text-skyglass" />
+                {file.mimeType?.startsWith("image/") ? (
+                  <img src={apiAssetUrl(file.previewUrl)} alt="" className="h-10 w-10 shrink-0 rounded-md object-cover" />
+                ) : (
+                  <FileIcon className="h-4 w-4 shrink-0 text-skyglass" />
+                )}
                 <span className="min-w-0 flex-1">
                   <span className="block truncate text-xs font-medium">{file.originalName}</span>
                   <span className="block text-[11px] text-slate-500">
@@ -108,19 +217,40 @@ export default function ChatPanel({ messages, files, typingUsers, fileUploading,
       </div>
 
       <div className="scrollbar-thin min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain p-4">
-        {messages.map((message) => (
-          <div key={message.id || `${message.username}-${message.timestamp}`} className="rounded-lg bg-white/[0.04] p-3">
-            <div className="mb-1 flex items-center justify-between gap-3">
-              <span className="truncate text-sm font-semibold text-slate-100">{message.username}</span>
-              <time className="shrink-0 text-[11px] text-slate-500">{formatTime(message.timestamp)}</time>
+        {messages.map((message) => {
+          const mentioned = currentUsername && message.message?.toLowerCase().includes(`@${currentUsername.toLowerCase()}`);
+          return (
+            <div
+              key={message.id || `${message.username}-${message.timestamp}`}
+              className={`rounded-lg border p-3 ${mentioned ? "border-amberglow/40 bg-amberglow/10" : "border-transparent bg-white/[0.04]"}`}
+            >
+              <div className="mb-1 flex items-center justify-between gap-3">
+                <span className="truncate text-sm font-semibold text-slate-100">{message.username}</span>
+                <time className="shrink-0 text-[11px] text-slate-500">{formatTime(message.timestamp)}</time>
+              </div>
+              {message.message && <p className="break-anywhere text-sm leading-6 text-slate-300 [overflow-wrap:anywhere]">{message.message}</p>}
+              {(message.attachments || []).map((file) => (
+                <div key={file.id}>{renderAttachment(file)}</div>
+              ))}
+              <div className="mt-2 flex flex-wrap items-center gap-1">
+                {REACTIONS.map((emoji) => (
+                  <button
+                    key={emoji}
+                    type="button"
+                    onClick={() => onReact?.(message.id, emoji)}
+                    className="rounded-full border border-line bg-white/[0.04] px-2 py-1 text-xs text-slate-300 hover:bg-white/10"
+                  >
+                    {emoji} {message.reactions?.[emoji] || ""}
+                  </button>
+                ))}
+              </div>
             </div>
-            <p className="break-anywhere text-sm leading-6 text-slate-300 [overflow-wrap:anywhere]">{message.message}</p>
-          </div>
-        ))}
+          );
+        })}
         <div ref={endRef} />
       </div>
 
-      <form onSubmit={submit} className="relative shrink-0 border-t border-line p-3">
+      <form onSubmit={submit} onPaste={handlePaste} className="relative shrink-0 border-t border-line p-3">
         {showEmojis && (
           <div className="absolute bottom-16 left-3 grid grid-cols-5 gap-1 rounded-lg border border-line bg-panel p-2 shadow-2xl">
             {EMOJIS.map((emoji) => (
@@ -149,9 +279,28 @@ export default function ChatPanel({ messages, files, typingUsers, fileUploading,
             value={value}
             onChange={handleChange}
             maxLength={1000}
-            placeholder="Message the room"
+            placeholder="Message, @mention, or paste an image"
             className="min-w-0 flex-1 bg-transparent text-sm text-slate-100 outline-none placeholder:text-slate-500"
           />
+          <button
+            type="button"
+            title="Upload file or image"
+            disabled={fileUploading}
+            onClick={() => fileInputRef.current?.click()}
+            className="grid h-10 w-10 shrink-0 place-items-center rounded-md text-slate-400 hover:bg-white/[0.08] hover:text-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {fileUploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Image className="h-5 w-5" />}
+          </button>
+          <button
+            type="button"
+            title={recording ? "Stop voice note" : "Record voice note"}
+            onClick={toggleRecording}
+            className={`grid h-10 w-10 shrink-0 place-items-center rounded-md ${
+              recording ? "bg-red-500/20 text-red-200" : "text-slate-400 hover:bg-white/[0.08] hover:text-slate-100"
+            }`}
+          >
+            {recording ? <Square className="h-4 w-4" /> : <Mic className="h-5 w-5" />}
+          </button>
           <button
             type="submit"
             title="Send"

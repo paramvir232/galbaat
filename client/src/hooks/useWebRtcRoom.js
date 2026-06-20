@@ -7,6 +7,7 @@ export function useWebRtcRoom(socket, roomId) {
   const [mediaError, setMediaError] = useState("");
   const [audioEnabled, setAudioEnabled] = useState(false);
   const [videoEnabled, setVideoEnabled] = useState(false);
+  const [screenSharing, setScreenSharing] = useState(false);
   const [peerStates, setPeerStates] = useState({});
   const [remoteStreams, setRemoteStreams] = useState([]);
   const peersRef = useRef(new Map());
@@ -173,8 +174,50 @@ export function useWebRtcRoom(socket, roomId) {
     });
 
     setVideoEnabled(false);
+    setScreenSharing(false);
     refreshLocalStreamState();
   }, [refreshLocalStreamState]);
+
+  const startScreenShare = useCallback(async () => {
+    const stream = await ensureMedia();
+    try {
+      const displayStream = await navigator.mediaDevices.getDisplayMedia({
+        video: true,
+        audio: false
+      });
+      const [screenTrack] = displayStream.getVideoTracks();
+      if (!screenTrack) return;
+
+      stream.getVideoTracks().forEach((track) => {
+        stream.removeTrack(track);
+        track.stop();
+      });
+      stream.addTrack(screenTrack);
+
+      let needsNegotiation = false;
+      await Promise.all(
+        [...peersRef.current.values()].map(async (pc) => {
+          const sender = pc.getSenders().find((item) => item.track?.kind === "video" || item.track === null);
+          if (sender) {
+            await sender.replaceTrack(screenTrack);
+            return;
+          }
+          pc.addTrack(screenTrack, stream);
+          needsNegotiation = true;
+        })
+      );
+      screenTrack.onended = () => {
+        stopVideo().catch(() => {});
+      };
+      setVideoEnabled(true);
+      setScreenSharing(true);
+      refreshLocalStreamState();
+      if (needsNegotiation) await renegotiateAllPeers();
+    } catch (error) {
+      setMediaError("Screen share permission is required.");
+      throw error;
+    }
+  }, [ensureMedia, refreshLocalStreamState, renegotiateAllPeers, stopVideo]);
 
   const createPeer = useCallback(
     async (peerId, initiator = false) => {
@@ -328,8 +371,10 @@ export function useWebRtcRoom(socket, roomId) {
     setTrackEnabled,
     startVideo,
     stopVideo,
+    startScreenShare,
     audioEnabled,
     videoEnabled,
+    screenSharing,
     localStream,
     remoteStreams,
     mediaError,

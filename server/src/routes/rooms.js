@@ -45,7 +45,13 @@ roomsRouter.get("/:roomId/messages", async (req, res, next) => {
       .sort({ timestamp: -1 })
       .limit(limit)
       .lean();
-    res.json({ messages: messages.reverse() });
+    res.json({
+      messages: messages.reverse().map((message) => ({
+        ...message,
+        id: message._id?.toString(),
+        reactions: Object.fromEntries(Object.entries(message.reactions || {}).map(([emoji, users]) => [emoji, users.length]))
+      }))
+    });
   } catch (error) {
     next(error);
   }
@@ -64,8 +70,25 @@ roomsRouter.post("/:roomId/files", ensureRoom, upload.single("file"), async (req
   try {
     if (!req.file) return res.status(400).json({ message: "No file uploaded" });
     const file = await registerUploadedFile(req.roomId, req.file, req.body.username);
+    const message = await Message.create({
+      roomId: req.roomId,
+      username: file.username,
+      message: file.mimeType?.startsWith("audio/") ? "shared a voice note" : file.mimeType?.startsWith("image/") ? "shared an image" : `shared ${file.originalName}`,
+      attachments: [file],
+      timestamp: new Date()
+    });
+    const payload = {
+      id: message._id.toString(),
+      roomId: req.roomId,
+      username: message.username,
+      message: message.message,
+      attachments: message.attachments,
+      reactions: {},
+      timestamp: message.timestamp
+    };
     await touchRoom(req.roomId, req.room.activeUsers);
     req.app.get("io")?.to(req.roomId).emit("file:uploaded", file);
+    req.app.get("io")?.to(req.roomId).emit("chat:message", payload);
     res.status(201).json({ file });
   } catch (error) {
     await removeUploadedFile(req.roomId, req.file?.filename);

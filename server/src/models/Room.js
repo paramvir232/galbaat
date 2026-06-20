@@ -20,6 +20,15 @@ const roomSchema = new mongoose.Schema(
       default: 0,
       min: 0
     },
+    locked: {
+      type: Boolean,
+      default: false
+    },
+    pinnedNotice: {
+      type: String,
+      default: "",
+      maxlength: 240
+    },
     lastActivity: {
       type: Date,
       default: Date.now,

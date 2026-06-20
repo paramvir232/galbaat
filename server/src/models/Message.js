@@ -16,8 +16,23 @@ const messageSchema = new mongoose.Schema(
     },
     message: {
       type: String,
-      required: true,
+      default: "",
       maxlength: 1000
+    },
+    attachments: [
+      {
+        id: String,
+        originalName: String,
+        mimeType: String,
+        size: Number,
+        previewUrl: String,
+        downloadUrl: String
+      }
+    ],
+    reactions: {
+      type: Map,
+      of: [String],
+      default: {}
     },
     timestamp: {
       type: Date,

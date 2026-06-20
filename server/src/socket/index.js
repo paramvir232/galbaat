@@ -1,4 +1,5 @@
 import { Message } from "../models/Message.js";
+import { Room } from "../models/Room.js";
 import { env } from "../config/env.js";
 import { deleteRoom, findRoom, touchRoom } from "../services/roomService.js";
 import { cleanText, cleanUsername } from "../utils/sanitize.js";
@@ -15,9 +16,12 @@ function publicUser(user) {
   return {
     id: user.id,
     username: user.username,
+    host: user.host,
     speaking: user.speaking,
     muted: user.muted,
     video: user.video,
+    handRaised: user.handRaised,
+    screenSharing: user.screenSharing,
     joinedAt: user.joinedAt
   };
 }
@@ -90,6 +94,10 @@ export function registerSocketHandlers(io) {
         }
 
         const users = roomUsers(normalizedRoomId);
+        if (room.locked && users.size > 0 && !users.has(socket.id)) {
+          ack?.({ ok: false, error: "Room is locked" });
+          return;
+        }
         cancelEmptyRoomCleanup(normalizedRoomId);
         const existingUser = users.get(socket.id);
         if (socket.data.roomId === normalizedRoomId && existingUser) {
@@ -108,9 +116,12 @@ export function registerSocketHandlers(io) {
         const user = {
           id: socket.id,
           username: cleanUsername(username),
+          host: users.size === 0,
           speaking: false,
           muted: false,
           video: false,
+          handRaised: false,
+          screenSharing: false,
           joinedAt: new Date().toISOString()
         };
 
@@ -153,6 +164,8 @@ export function registerSocketHandlers(io) {
           roomId: normalizedRoomId,
           username: saved.username,
           message: saved.message,
+          attachments: saved.attachments || [],
+          reactions: {},
           timestamp: saved.timestamp
         };
 
@@ -162,6 +175,28 @@ export function registerSocketHandlers(io) {
       } catch (error) {
         ack?.({ ok: false, error: "Message failed" });
       }
+    });
+
+    socket.on("chat:reaction", async ({ roomId, messageId, emoji }) => {
+      const normalizedRoomId = String(roomId || socket.data.roomId || "").toUpperCase();
+      const userMap = rooms.get(normalizedRoomId);
+      if (!userMap?.has(socket.id)) return;
+
+      const cleanEmoji = cleanText(emoji, 8);
+      if (!["👍", "😂", "❤️", "🔥", "✅"].includes(cleanEmoji)) return;
+
+      const message = await Message.findOne({ _id: messageId, roomId: normalizedRoomId });
+      if (!message) return;
+      const current = new Set(message.reactions?.get(cleanEmoji) || []);
+      if (current.has(socket.data.username)) current.delete(socket.data.username);
+      else current.add(socket.data.username);
+      message.reactions.set(cleanEmoji, [...current]);
+      await message.save();
+
+      io.to(normalizedRoomId).emit("chat:reaction", {
+        messageId: message._id.toString(),
+        reactions: Object.fromEntries([...message.reactions.entries()].map(([key, users]) => [key, users.length]))
+      });
     });
 
     socket.on("typing:start", ({ roomId }) => {
@@ -205,6 +240,71 @@ export function registerSocketHandlers(io) {
       user.video = Boolean(video);
       emitParticipants(io, normalizedRoomId);
       touchRoom(normalizedRoomId, rooms.get(normalizedRoomId).size).catch(() => {});
+    });
+
+    socket.on("participant:hand", ({ roomId, raised }) => {
+      const normalizedRoomId = String(roomId || socket.data.roomId || "").toUpperCase();
+      const user = rooms.get(normalizedRoomId)?.get(socket.id);
+      if (!user) return;
+      user.handRaised = Boolean(raised);
+      emitParticipants(io, normalizedRoomId);
+    });
+
+    socket.on("participant:screen", ({ roomId, sharing }) => {
+      const normalizedRoomId = String(roomId || socket.data.roomId || "").toUpperCase();
+      const user = rooms.get(normalizedRoomId)?.get(socket.id);
+      if (!user) return;
+      user.screenSharing = Boolean(sharing);
+      user.video = Boolean(sharing) || user.video;
+      emitParticipants(io, normalizedRoomId);
+    });
+
+    socket.on("room:notice", async ({ roomId, notice }) => {
+      const normalizedRoomId = String(roomId || socket.data.roomId || "").toUpperCase();
+      const user = rooms.get(normalizedRoomId)?.get(socket.id);
+      if (!user?.host) return;
+      const pinnedNotice = cleanText(notice, 240);
+      await Room.updateOne({ roomId: normalizedRoomId }, { $set: { pinnedNotice } });
+      io.to(normalizedRoomId).emit("room:notice", { pinnedNotice });
+    });
+
+    socket.on("room:lock", async ({ roomId, locked }) => {
+      const normalizedRoomId = String(roomId || socket.data.roomId || "").toUpperCase();
+      const user = rooms.get(normalizedRoomId)?.get(socket.id);
+      if (!user?.host) return;
+      const nextLocked = Boolean(locked);
+      await Room.updateOne({ roomId: normalizedRoomId }, { $set: { locked: nextLocked } });
+      io.to(normalizedRoomId).emit("room:lock", { locked: nextLocked });
+    });
+
+    socket.on("room:end", async ({ roomId }) => {
+      const normalizedRoomId = String(roomId || socket.data.roomId || "").toUpperCase();
+      const user = rooms.get(normalizedRoomId)?.get(socket.id);
+      if (!user?.host) return;
+      io.to(normalizedRoomId).emit("room:ended");
+      await deleteRoom(normalizedRoomId);
+      rooms.delete(normalizedRoomId);
+    });
+
+    socket.on("host:mute", ({ roomId, targetId }) => {
+      const normalizedRoomId = String(roomId || socket.data.roomId || "").toUpperCase();
+      const users = rooms.get(normalizedRoomId);
+      const host = users?.get(socket.id);
+      const target = users?.get(targetId);
+      if (!host?.host || !target) return;
+      target.muted = true;
+      io.to(targetId).emit("host:muted");
+      emitParticipants(io, normalizedRoomId);
+    });
+
+    socket.on("host:kick", ({ roomId, targetId }) => {
+      const normalizedRoomId = String(roomId || socket.data.roomId || "").toUpperCase();
+      const users = rooms.get(normalizedRoomId);
+      const host = users?.get(socket.id);
+      const target = users?.get(targetId);
+      if (!host?.host || !target?.id || target.host) return;
+      io.to(targetId).emit("host:kicked");
+      io.sockets.sockets.get(targetId)?.disconnect(true);
     });
 
     socket.on("room:heartbeat", ({ roomId }) => {

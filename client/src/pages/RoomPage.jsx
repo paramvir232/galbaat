@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { motion } from "framer-motion";
-import { ArrowLeft, Hash, Loader2, Menu, Radio, Video, VideoOff, Wifi, WifiOff, X } from "lucide-react";
+import { ArrowLeft, FileText, Hand, Hash, Loader2, Lock, Megaphone, Menu, Pin, Radio, ScreenShare, ScreenShareOff, Unlock, Video, VideoOff, Wifi, WifiOff, X } from "lucide-react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import ChatPanel from "../components/ChatPanel.jsx";
 import ParticipantList from "../components/ParticipantList.jsx";
@@ -25,8 +25,10 @@ export default function RoomPage() {
     setTrackEnabled,
     startVideo,
     stopVideo,
+    startScreenShare,
     audioEnabled,
     videoEnabled,
+    screenSharing,
     localStream,
     remoteStreams,
     mediaError
@@ -46,14 +48,25 @@ export default function RoomPage() {
   const [fileUploading, setFileUploading] = useState(false);
   const [videoBusy, setVideoBusy] = useState(false);
   const [mobilePanel, setMobilePanel] = useState(null);
+  const [handRaised, setHandRaised] = useState(false);
+  const [noticeDraft, setNoticeDraft] = useState("");
+  const [unreadCount, setUnreadCount] = useState(0);
   const speakingRef = useRef(false);
   const micLockedRef = useRef(false);
   const videoEnabledRef = useRef(false);
   const joinedRef = useRef(false);
+  const wasScreenSharingRef = useRef(false);
 
   useEffect(() => {
     videoEnabledRef.current = videoEnabled;
   }, [videoEnabled]);
+
+  useEffect(() => {
+    if (wasScreenSharingRef.current && !screenSharing && connected) {
+      socket.emit("participant:screen", { roomId, sharing: false });
+    }
+    wasScreenSharingRef.current = screenSharing;
+  }, [connected, roomId, screenSharing, socket]);
 
   const stopTalking = useCallback((force = false) => {
     if (micLockedRef.current && !force) return;
@@ -107,6 +120,7 @@ export default function RoomPage() {
           getFiles(roomId)
         ]);
         setRoom(loadedRoom);
+        setNoticeDraft(loadedRoom.pinnedNotice || "");
         setMessages(history);
         setFiles(roomFiles);
       } catch (err) {
@@ -184,6 +198,10 @@ export default function RoomPage() {
     }
     function onChat(message) {
       setMessages((current) => [...current, message]);
+      if (mobilePanel !== "chat") setUnreadCount((count) => count + 1);
+    }
+    function onReaction({ messageId, reactions }) {
+      setMessages((current) => current.map((message) => (message.id === messageId ? { ...message, reactions } : message)));
     }
     function onFileUploaded(file) {
       setFiles((current) => (current.some((item) => item.id === file.id) ? current : [...current, file]));
@@ -199,6 +217,25 @@ export default function RoomPage() {
         return next;
       });
     }
+    function onNotice({ pinnedNotice }) {
+      setRoom((current) => (current ? { ...current, pinnedNotice } : current));
+      setNoticeDraft(pinnedNotice || "");
+    }
+    function onLock({ locked }) {
+      setRoom((current) => (current ? { ...current, locked } : current));
+    }
+    function onMutedByHost() {
+      setMuted(true);
+      stopTalking(true);
+    }
+    function onKicked() {
+      setError("You were removed from the room.");
+      navigate("/");
+    }
+    function onRoomEnded() {
+      setError("This room has ended.");
+      navigate("/");
+    }
 
     socket.on("connect", onConnect);
     socket.on("disconnect", onDisconnect);
@@ -206,9 +243,15 @@ export default function RoomPage() {
     socket.on("participant:joined", onJoined);
     socket.on("participant:left", onLeft);
     socket.on("chat:message", onChat);
+    socket.on("chat:reaction", onReaction);
     socket.on("file:uploaded", onFileUploaded);
     socket.on("typing:start", onTypingStart);
     socket.on("typing:stop", onTypingStop);
+    socket.on("room:notice", onNotice);
+    socket.on("room:lock", onLock);
+    socket.on("host:muted", onMutedByHost);
+    socket.on("host:kicked", onKicked);
+    socket.on("room:ended", onRoomEnded);
     setConnected(socket.connected);
 
     return () => {
@@ -218,11 +261,21 @@ export default function RoomPage() {
       socket.off("participant:joined", onJoined);
       socket.off("participant:left", onLeft);
       socket.off("chat:message", onChat);
+      socket.off("chat:reaction", onReaction);
       socket.off("file:uploaded", onFileUploaded);
       socket.off("typing:start", onTypingStart);
       socket.off("typing:stop", onTypingStop);
+      socket.off("room:notice", onNotice);
+      socket.off("room:lock", onLock);
+      socket.off("host:muted", onMutedByHost);
+      socket.off("host:kicked", onKicked);
+      socket.off("room:ended", onRoomEnded);
     };
-  }, [room, self?.id, socket]);
+  }, [mobilePanel, navigate, room, self?.id, socket, stopTalking]);
+
+  useEffect(() => {
+    if (mobilePanel === "chat") setUnreadCount(0);
+  }, [mobilePanel]);
 
   useEffect(() => {
     if (!connected || !joinedRef.current) return undefined;
@@ -257,6 +310,57 @@ export default function RoomPage() {
     socket.emit("chat:message", { roomId, message });
   }
 
+  function reactToMessage(messageId, emoji) {
+    socket.emit("chat:reaction", { roomId, messageId, emoji });
+  }
+
+  function toggleHand() {
+    const next = !handRaised;
+    setHandRaised(next);
+    socket.emit("participant:hand", { roomId, raised: next });
+  }
+
+  function saveNotice() {
+    socket.emit("room:notice", { roomId, notice: noticeDraft });
+  }
+
+  function toggleLock() {
+    socket.emit("room:lock", { roomId, locked: !room?.locked });
+  }
+
+  function endRoom() {
+    socket.emit("room:end", { roomId });
+  }
+
+  function hostMute(targetId) {
+    socket.emit("host:mute", { roomId, targetId });
+  }
+
+  function kickParticipant(targetId) {
+    socket.emit("host:kick", { roomId, targetId });
+  }
+
+  function downloadTranscript() {
+    const lines = [
+      `${room?.roomName || "GalBaat Room"} transcript`,
+      `Room code: ${roomId}`,
+      `Exported: ${new Date().toLocaleString()}`,
+      "",
+      ...messages.map((message) => {
+        const time = new Date(message.timestamp).toLocaleString();
+        const attachments = (message.attachments || []).map((file) => ` [${file.originalName}]`).join("");
+        return `[${time}] ${message.username}: ${message.message || "shared a file"}${attachments}`;
+      })
+    ];
+    const blob = new window.Blob([lines.join("\n")], { type: "text/plain;charset=utf-8" });
+    const url = window.URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `${roomId}-transcript.txt`;
+    link.click();
+    window.URL.revokeObjectURL(url);
+  }
+
   async function uploadFile(file) {
     setFileUploading(true);
     setError("");
@@ -285,6 +389,7 @@ export default function RoomPage() {
       if (videoEnabled) {
         await stopVideo();
         socket.emit("participant:video", { roomId, video: false });
+        socket.emit("participant:screen", { roomId, sharing: false });
       } else {
         await startVideo();
         socket.emit("participant:video", { roomId, video: true });
@@ -296,9 +401,30 @@ export default function RoomPage() {
     }
   }
 
+  async function toggleScreenShare() {
+    if (!connected || videoBusy) return;
+    setVideoBusy(true);
+    setError("");
+    try {
+      if (screenSharing) {
+        await stopVideo();
+        socket.emit("participant:screen", { roomId, sharing: false });
+        socket.emit("participant:video", { roomId, video: false });
+      } else {
+        await startScreenShare();
+        socket.emit("participant:screen", { roomId, sharing: true });
+      }
+    } catch (err) {
+      setError(err.message || "Unable to share screen");
+    } finally {
+      setVideoBusy(false);
+    }
+  }
+
   const statusTone = status === "connected" ? "good" : status === "voice-limited" ? "warn" : "neutral";
   const typingUsers = Object.values(typing);
   const hasVideo = videoEnabled || remoteStreams.some(({ stream }) => stream.getVideoTracks().some((track) => track.readyState === "live"));
+  const isHost = Boolean(self?.host);
 
   return (
     <main className="flex h-dvh min-h-0 flex-col overflow-hidden p-3 text-slate-100 sm:p-4">
@@ -323,6 +449,24 @@ export default function RoomPage() {
           <ShareRoom roomId={roomId} />
           <button
             type="button"
+            onClick={downloadTranscript}
+            title="Download transcript"
+            className="grid h-10 w-10 place-items-center rounded-md border border-line bg-white/[0.05] text-slate-200 hover:bg-white/10"
+          >
+            <FileText className="h-4 w-4" />
+          </button>
+          {isHost && (
+            <button
+              type="button"
+              onClick={toggleLock}
+              title={room?.locked ? "Unlock room" : "Lock room"}
+              className="grid h-10 w-10 place-items-center rounded-md border border-line bg-white/[0.05] text-slate-200 hover:bg-white/10"
+            >
+              {room?.locked ? <Lock className="h-4 w-4 text-amberglow" /> : <Unlock className="h-4 w-4" />}
+            </button>
+          )}
+          <button
+            type="button"
             onClick={() => setMobilePanel((panel) => (panel ? null : "menu"))}
             className="grid h-10 w-10 place-items-center rounded-md border border-line bg-white/[0.05] md:hidden"
           >
@@ -333,7 +477,7 @@ export default function RoomPage() {
 
       <section className="grid min-h-0 flex-1 gap-3 overflow-hidden md:grid-cols-[270px_minmax(0,1fr)_340px]">
         <div className={`${mobilePanel === "participants" || !mobilePanel ? "block" : "hidden"} min-h-0 overflow-hidden md:block`}>
-          <ParticipantList participants={participants} selfId={self?.id} />
+          <ParticipantList participants={participants} selfId={self?.id} isHost={isHost} onHostMute={hostMute} onKick={kickParticipant} />
         </div>
 
         <motion.div layout className="glass flex min-h-[380px] flex-col items-center justify-center gap-5 overflow-hidden rounded-lg p-4 sm:p-6">
@@ -357,7 +501,43 @@ export default function RoomPage() {
               {videoBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : videoEnabled ? <Video className="h-4 w-4" /> : <VideoOff className="h-4 w-4" />}
               {videoEnabled ? "Camera on" : "Camera off"}
             </button>
+            <button
+              type="button"
+              disabled={!connected || videoBusy}
+              onClick={toggleScreenShare}
+              className={`inline-flex items-center gap-2 rounded-full border px-4 py-2 text-sm font-medium transition disabled:cursor-not-allowed disabled:opacity-60 ${
+                screenSharing ? "border-mint/40 bg-mint/10 text-mint" : "border-line bg-white/[0.04] text-slate-300 hover:bg-white/10"
+              }`}
+            >
+              {screenSharing ? <ScreenShareOff className="h-4 w-4" /> : <ScreenShare className="h-4 w-4" />}
+              {screenSharing ? "Stop share" : "Share screen"}
+            </button>
           </div>
+
+          {(room?.pinnedNotice || isHost) && (
+            <div className="w-full max-w-3xl rounded-lg border border-line bg-white/[0.04] p-3">
+              <div className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase text-slate-400">
+                <Pin className="h-3.5 w-3.5 text-amberglow" />
+                Room Notice
+              </div>
+              {isHost ? (
+                <div className="flex gap-2">
+                  <input
+                    value={noticeDraft}
+                    onChange={(event) => setNoticeDraft(event.target.value)}
+                    maxLength={240}
+                    placeholder="Pin a topic, agenda, or room rule"
+                    className="min-w-0 flex-1 rounded-md border border-line bg-ink/60 px-3 py-2 text-sm text-slate-100 outline-none placeholder:text-slate-500"
+                  />
+                  <button type="button" onClick={saveNotice} className="grid h-10 w-10 shrink-0 place-items-center rounded-md bg-mint text-ink hover:bg-mint/90" title="Save notice">
+                    <Megaphone className="h-4 w-4" />
+                  </button>
+                </div>
+              ) : (
+                <p className="text-sm text-slate-200">{room.pinnedNotice}</p>
+              )}
+            </div>
+          )}
 
           {hasVideo && <VideoGrid localStream={localStream} remoteStreams={remoteStreams} participants={participants} selfId={self?.id} />}
 
@@ -373,6 +553,24 @@ export default function RoomPage() {
             onToggleMute={toggleMute}
           />
 
+          <div className="flex flex-wrap items-center justify-center gap-3">
+            <button
+              type="button"
+              onClick={toggleHand}
+              className={`inline-flex items-center gap-2 rounded-full border px-4 py-2 text-sm font-medium transition ${
+                handRaised ? "border-amberglow/50 bg-amberglow/10 text-amberglow" : "border-line bg-white/[0.05] text-slate-200 hover:bg-white/10"
+              }`}
+            >
+              <Hand className="h-4 w-4" />
+              {handRaised ? "Lower hand" : "Raise hand"}
+            </button>
+            {isHost && (
+              <button type="button" onClick={endRoom} className="rounded-full border border-red-400/30 bg-red-500/10 px-4 py-2 text-sm font-medium text-red-100 hover:bg-red-500/20">
+                End room
+              </button>
+            )}
+          </div>
+
           {(error || mediaError) && (
             <p className="mt-6 max-w-md rounded-md border border-amberglow/30 bg-amberglow/10 p-3 text-center text-sm text-amberglow">
               {error || mediaError}
@@ -386,8 +584,10 @@ export default function RoomPage() {
             files={files}
             typingUsers={typingUsers}
             fileUploading={fileUploading}
+            currentUsername={self?.username || getGuestName()}
             onSend={sendMessage}
             onUploadFile={uploadFile}
+            onReact={reactToMessage}
             onTypingStart={() => socket.emit("typing:start", { roomId })}
             onTypingStop={() => socket.emit("typing:stop", { roomId })}
           />
@@ -407,7 +607,7 @@ export default function RoomPage() {
           onClick={() => setMobilePanel("chat")}
           className="rounded-md border border-line bg-white/[0.05] px-3 py-3 text-sm text-slate-200"
         >
-          Chat
+          Chat{unreadCount ? ` (${unreadCount})` : ""}
         </button>
       </nav>
     </main>
