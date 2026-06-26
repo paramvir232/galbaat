@@ -24,7 +24,12 @@ const corsOptions = {
 };
 
 app.set("trust proxy", 1);
-app.use(helmet({ crossOriginEmbedderPolicy: false }));
+app.use(
+  helmet({
+    crossOriginEmbedderPolicy: false,
+    crossOriginResourcePolicy: { policy: "cross-origin" }
+  })
+);
 app.use(compression());
 app.use(cors(corsOptions));
 app.use(express.json({ limit: "32kb" }));

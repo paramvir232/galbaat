@@ -1,5 +1,6 @@
 import { Message } from "../models/Message.js";
 import { Room } from "../models/Room.js";
+import mongoose from "mongoose";
 import { env } from "../config/env.js";
 import { deleteRoom, findRoom, touchRoom } from "../services/roomService.js";
 import { cleanText, cleanUsername } from "../utils/sanitize.js";
@@ -181,6 +182,7 @@ export function registerSocketHandlers(io) {
       const normalizedRoomId = String(roomId || socket.data.roomId || "").toUpperCase();
       const userMap = rooms.get(normalizedRoomId);
       if (!userMap?.has(socket.id)) return;
+      if (!mongoose.isValidObjectId(messageId)) return;
 
       const cleanEmoji = cleanText(emoji, 8);
       if (!["👍", "😂", "❤️", "🔥", "✅"].includes(cleanEmoji)) return;

@@ -348,6 +348,19 @@ export default function RoomPage() {
   }
 
   function reactToMessage(messageId, emoji) {
+    setMessages((current) =>
+      current.map((message) => {
+        if (message.id !== messageId) return message;
+        const currentCount = Number(message.reactions?.[emoji] || 0);
+        return {
+          ...message,
+          reactions: {
+            ...(message.reactions || {}),
+            [emoji]: currentCount + 1
+          }
+        };
+      })
+    );
     socket.emit("chat:reaction", { roomId, messageId, emoji });
   }
 

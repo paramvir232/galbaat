@@ -14,6 +14,8 @@ function formatBytes(value) {
   return `${(value / (1024 * 1024)).toFixed(1)} MB`;
 }
 
+const REACTION_OPTIONS = ["\u{1F44D}", "\u{1F602}", "\u2764\uFE0F", "\u{1F525}", "\u2705"];
+
 function pastedImageName(file) {
   const extension = file.type.split("/")[1]?.replace("jpeg", "jpg") || "png";
   return `pasted-image-${new Date().toISOString().replace(/[:.]/g, "-")}.${extension}`;
@@ -27,6 +29,10 @@ function attachmentKind(file) {
 
 function reactionEntries(reactions = {}) {
   return Object.entries(reactions).filter(([, count]) => Number(count) > 0);
+}
+
+function canReactToMessage(message) {
+  return /^[a-f\d]{24}$/i.test(String(message.id || ""));
 }
 
 export default function ChatPanel({
@@ -43,6 +49,7 @@ export default function ChatPanel({
 }) {
   const [value, setValue] = useState("");
   const [showEmojis, setShowEmojis] = useState(false);
+  const [reactionPickerId, setReactionPickerId] = useState(null);
   const [recording, setRecording] = useState(false);
   const [filesHeight, setFilesHeight] = useState(150);
   const endRef = useRef(null);
@@ -179,6 +186,11 @@ export default function ChatPanel({
     window.removeEventListener("pointermove", resizeFiles);
   }
 
+  function reactToMessage(messageId, emoji) {
+    setReactionPickerId(null);
+    onReact?.(messageId, emoji);
+  }
+
   return (
     <aside className="glass flex h-full min-h-0 flex-col overflow-hidden rounded-lg">
       <div className="shrink-0 border-b border-line p-3 sm:p-4">
@@ -256,9 +268,14 @@ export default function ChatPanel({
         {messages.map((message) => {
           const mentioned = currentUsername && message.message?.toLowerCase().includes(`@${currentUsername.toLowerCase()}`);
           const visibleReactions = reactionEntries(message.reactions);
+          const reactionAllowed = canReactToMessage(message);
           return (
             <div
               key={message.id || `${message.username}-${message.timestamp}`}
+              onMouseEnter={() => {
+                if (reactionAllowed) setReactionPickerId(message.id);
+              }}
+              onMouseLeave={() => setReactionPickerId((id) => (id === message.id ? null : id))}
               className={`group relative rounded-lg border p-3 ${visibleReactions.length ? "mb-4" : ""} ${mentioned ? "border-amberglow/40 bg-amberglow/10" : "border-transparent bg-white/[0.04]"}`}
             >
               <div className="mb-1 flex items-center justify-between gap-3">
@@ -275,7 +292,7 @@ export default function ChatPanel({
                   <button
                     key={emoji}
                     type="button"
-                    onClick={() => onReact?.(message.id, emoji)}
+                    onClick={() => reactToMessage(message.id, emoji)}
                     className="inline-flex h-7 items-center gap-1 rounded-full border border-line bg-panel px-2 text-xs text-slate-100 shadow-lg hover:bg-white/10"
                   >
                     <span>{emoji}</span>
@@ -284,12 +301,13 @@ export default function ChatPanel({
                   ))}
                 </div>
               )}
-              <div className="absolute -bottom-4 right-3 hidden rounded-full border border-line bg-panel/95 p-1 shadow-xl group-hover:flex">
-                {REACTIONS.map((emoji) => (
+              {reactionPickerId === message.id && (
+              <div className="absolute -bottom-4 right-3 z-20 flex rounded-full border border-line bg-panel/95 p-1 shadow-xl">
+                {REACTION_OPTIONS.map((emoji) => (
                   <button
                     key={emoji}
                     type="button"
-                    onClick={() => onReact?.(message.id, emoji)}
+                    onClick={() => reactToMessage(message.id, emoji)}
                     className="grid h-8 w-8 place-items-center rounded-full text-sm hover:bg-white/10"
                     title="React"
                   >
@@ -297,6 +315,7 @@ export default function ChatPanel({
                   </button>
                 ))}
               </div>
+              )}
             </div>
           );
         })}

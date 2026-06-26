@@ -67,10 +67,11 @@ roomsRouter.get("/:roomId/files", ensureRoom, async (req, res, next) => {
 });
 
 roomsRouter.post("/:roomId/files", ensureRoom, upload.single("file"), async (req, res, next) => {
+  let file;
   try {
     if (!req.file) return res.status(400).json({ message: "No file uploaded" });
     const chatOnly = req.body.chatOnly === "true";
-    const file = await registerUploadedFile(req.roomId, req.file, req.body.username, { chatOnly });
+    file = await registerUploadedFile(req.roomId, req.file, req.body.username, { chatOnly });
     const message = await Message.create({
       roomId: req.roomId,
       username: file.username,
@@ -94,7 +95,7 @@ roomsRouter.post("/:roomId/files", ensureRoom, upload.single("file"), async (req
     req.app.get("io")?.to(req.roomId).emit("chat:message", payload);
     res.status(201).json({ file });
   } catch (error) {
-    await removeUploadedFile(req.roomId, req.file?.filename);
+    await removeUploadedFile(req.roomId, file?.id);
     next(error);
   }
 });
