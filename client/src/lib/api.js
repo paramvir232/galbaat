@@ -38,6 +38,7 @@ export async function uploadRoomFile(roomId, file, username, options = {}) {
   body.append("file", file);
   body.append("username", username);
   if (options.chatOnly) body.append("chatOnly", "true");
+  if (options.message) body.append("message", options.message);
 
   const res = await fetch(`${API_URL}/api/rooms/${encodeURIComponent(roomId)}/files`, {
     method: "POST",

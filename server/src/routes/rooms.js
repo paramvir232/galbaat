@@ -2,9 +2,27 @@ import express from "express";
 import { Message } from "../models/Message.js";
 import { createRoom, findRoom, touchRoom } from "../services/roomService.js";
 import { getRoomFile, registerUploadedFile, removeUploadedFile, upload } from "../services/fileService.js";
-import { cleanRoomName } from "../utils/sanitize.js";
+import { cleanRoomName, cleanText } from "../utils/sanitize.js";
 
 export const roomsRouter = express.Router();
+
+function reactionCounts(reactions = {}) {
+  const entries = reactions instanceof Map ? [...reactions.entries()] : Object.entries(reactions);
+  return Object.fromEntries(entries.map(([emoji, users]) => [emoji, Array.isArray(users) ? users.length : Number(users) || 0]));
+}
+
+function publicMessage(message) {
+  const deleted = Boolean(message.deletedAt);
+  return {
+    ...message,
+    id: message._id?.toString(),
+    message: deleted ? "" : message.message,
+    attachments: deleted ? [] : message.attachments || [],
+    reactions: deleted ? {} : reactionCounts(message.reactions),
+    editedAt: message.editedAt || null,
+    deletedAt: message.deletedAt || null
+  };
+}
 
 async function ensureRoom(req, res, next) {
   try {
@@ -46,11 +64,7 @@ roomsRouter.get("/:roomId/messages", async (req, res, next) => {
       .limit(limit)
       .lean();
     res.json({
-      messages: messages.reverse().map((message) => ({
-        ...message,
-        id: message._id?.toString(),
-        reactions: Object.fromEntries(Object.entries(message.reactions || {}).map(([emoji, users]) => [emoji, users.length]))
-      }))
+      messages: messages.reverse().map(publicMessage)
     });
   } catch (error) {
     next(error);
@@ -63,11 +77,12 @@ roomsRouter.post("/:roomId/files", ensureRoom, upload.single("file"), async (req
     if (!req.file) return res.status(400).json({ message: "No file uploaded" });
     file = await registerUploadedFile(req.roomId, req.file, req.body.username, { chatOnly: true });
     await touchRoom(req.roomId, req.room.activeUsers);
+    const cleanMessage = cleanText(req.body.message || "", 1000);
 
     const message = await Message.create({
       roomId: req.roomId,
       username: file.username,
-      message: file.mimeType?.startsWith("audio/") ? "shared a voice note" : file.mimeType?.startsWith("image/") ? "shared an image" : `shared ${file.originalName}`,
+      message: cleanMessage,
       attachments: [file],
       timestamp: new Date()
     });
@@ -78,6 +93,8 @@ roomsRouter.post("/:roomId/files", ensureRoom, upload.single("file"), async (req
       message: message.message,
       attachments: message.attachments,
       reactions: {},
+      editedAt: message.editedAt || null,
+      deletedAt: message.deletedAt || null,
       timestamp: message.timestamp
     };
     req.app.get("io")?.to(req.roomId).emit("chat:message", payload);

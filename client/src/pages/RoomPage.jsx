@@ -100,9 +100,12 @@ export default function RoomPage() {
   useEffect(() => {
     if (wasScreenSharingRef.current && !screenSharing && connected) {
       socket.emit("participant:screen", { roomId, sharing: false });
+      if (!videoEnabled) {
+        socket.emit("participant:video", { roomId, video: false });
+      }
     }
     wasScreenSharingRef.current = screenSharing;
-  }, [connected, roomId, screenSharing, socket]);
+  }, [connected, roomId, screenSharing, socket, videoEnabled]);
 
   const stopTalking = useCallback((force = false) => {
     if (micLockedRef.current && !force) return;
@@ -265,6 +268,9 @@ export default function RoomPage() {
     function onReaction({ messageId, reactions }) {
       setMessages((current) => current.map((message) => (message.id === messageId ? { ...message, reactions } : message)));
     }
+    function onChatUpdate(nextMessage) {
+      setMessages((current) => current.map((message) => (message.id === nextMessage.id ? { ...message, ...nextMessage } : message)));
+    }
     function onTypingStart(user) {
       if (user.id === self?.id) return;
       setTyping((current) => ({ ...current, [user.id]: user.username }));
@@ -299,6 +305,7 @@ export default function RoomPage() {
     socket.on("participant:left", onLeft);
     socket.on("chat:message", onChat);
     socket.on("chat:reaction", onReaction);
+    socket.on("chat:update", onChatUpdate);
     socket.on("typing:start", onTypingStart);
     socket.on("typing:stop", onTypingStop);
     socket.on("room:lock", onLock);
@@ -315,6 +322,7 @@ export default function RoomPage() {
       socket.off("participant:left", onLeft);
       socket.off("chat:message", onChat);
       socket.off("chat:reaction", onReaction);
+      socket.off("chat:update", onChatUpdate);
       socket.off("typing:start", onTypingStart);
       socket.off("typing:stop", onTypingStop);
       socket.off("room:lock", onLock);
@@ -363,6 +371,18 @@ export default function RoomPage() {
 
   function reactToMessage(messageId, emoji) {
     socket.emit("chat:reaction", { roomId, messageId, emoji });
+  }
+
+  function editMessage(messageId, message) {
+    socket.emit("chat:edit", { roomId, messageId, message }, (ack) => {
+      if (!ack?.ok) setError(ack?.error || "Message edit failed");
+    });
+  }
+
+  function deleteMessage(messageId) {
+    socket.emit("chat:delete", { roomId, messageId }, (ack) => {
+      if (!ack?.ok) setError(ack?.error || "Message delete failed");
+    });
   }
 
   function toggleHand() {
@@ -656,6 +676,8 @@ export default function RoomPage() {
             onSend={sendMessage}
             onUploadFile={uploadFile}
             onReact={reactToMessage}
+            onEdit={editMessage}
+            onDelete={deleteMessage}
             onTypingStart={() => socket.emit("typing:start", { roomId })}
             onTypingStop={() => socket.emit("typing:stop", { roomId })}
           />

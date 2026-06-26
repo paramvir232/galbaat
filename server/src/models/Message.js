@@ -34,6 +34,14 @@ const messageSchema = new mongoose.Schema(
       of: [String],
       default: {}
     },
+    editedAt: {
+      type: Date,
+      default: null
+    },
+    deletedAt: {
+      type: Date,
+      default: null
+    },
     timestamp: {
       type: Date,
       default: Date.now,

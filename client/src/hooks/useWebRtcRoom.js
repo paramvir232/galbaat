@@ -2,6 +2,14 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 const STUN_URL = import.meta.env.VITE_STUN_URL || "stun:stun.l.google.com:19302";
 
+function liveVideoTrack(stream) {
+  return stream?.getVideoTracks().find((track) => track.readyState === "live") || null;
+}
+
+function videoTransceiver(pc) {
+  return pc.getTransceivers().find((transceiver) => transceiver.receiver?.track?.kind === "video" || transceiver.sender?.track?.kind === "video");
+}
+
 export function useWebRtcRoom(socket, roomId) {
   const [localStream, setLocalStream] = useState(null);
   const [mediaError, setMediaError] = useState("");
@@ -16,6 +24,8 @@ export function useWebRtcRoom(socket, roomId) {
   const peerStreamsRef = useRef(new Map());
   const localStreamRef = useRef(null);
   const pendingCandidatesRef = useRef(new Map());
+  const negotiatingRef = useRef(new Set());
+  const negotiationQueueRef = useRef(new Set());
 
   const setTrackEnabled = useCallback((enabled) => {
     setAudioEnabled(enabled);
@@ -100,10 +110,23 @@ export function useWebRtcRoom(socket, roomId) {
 
   const renegotiatePeer = useCallback(
     async (peerId, pc) => {
-      if (pc.signalingState !== "stable") return;
-      const offer = await pc.createOffer();
-      await pc.setLocalDescription(offer);
-      socket.emit("webrtc:offer", { to: peerId, description: pc.localDescription });
+      if (!pc || pc.connectionState === "closed") return;
+      if (pc.signalingState !== "stable" || negotiatingRef.current.has(peerId)) {
+        negotiationQueueRef.current.add(peerId);
+        return;
+      }
+
+      negotiatingRef.current.add(peerId);
+      try {
+        const offer = await pc.createOffer();
+        await pc.setLocalDescription(offer);
+        socket.emit("webrtc:offer", { to: peerId, description: pc.localDescription });
+      } finally {
+        negotiatingRef.current.delete(peerId);
+        if (negotiationQueueRef.current.delete(peerId)) {
+          window.setTimeout(() => renegotiatePeer(peerId, pc).catch(() => {}), 0);
+        }
+      }
     },
     [socket]
   );
@@ -112,9 +135,29 @@ export function useWebRtcRoom(socket, roomId) {
     await Promise.all([...peersRef.current.entries()].map(([peerId, pc]) => renegotiatePeer(peerId, pc).catch(() => {})));
   }, [renegotiatePeer]);
 
+  const syncVideoTrackToPeers = useCallback(
+    async (track) => {
+      let needsNegotiation = false;
+      await Promise.all(
+        [...peersRef.current.values()].map(async (pc) => {
+          let transceiver = videoTransceiver(pc);
+          if (!transceiver) {
+            transceiver = pc.addTransceiver("video", { direction: "sendrecv" });
+            needsNegotiation = true;
+          }
+          await transceiver.sender.replaceTrack(track || null);
+        })
+      );
+      if (needsNegotiation || track) await renegotiateAllPeers();
+    },
+    [renegotiateAllPeers]
+  );
+
   const startVideo = useCallback(async () => {
     const stream = await ensureMedia();
-    if (stream.getVideoTracks().some((track) => track.readyState === "live")) {
+    const existingVideoTrack = liveVideoTrack(stream);
+    if (existingVideoTrack) {
+      await syncVideoTrackToPeers(existingVideoTrack);
       setVideoEnabled(true);
       return;
     }
@@ -131,27 +174,19 @@ export function useWebRtcRoom(socket, roomId) {
       const [videoTrack] = cameraStream.getVideoTracks();
       if (!videoTrack) return;
 
+      stream.getVideoTracks().forEach((track) => {
+        stream.removeTrack(track);
+        track.stop();
+      });
       stream.addTrack(videoTrack);
-      let needsNegotiation = false;
-      await Promise.all(
-        [...peersRef.current.values()].map(async (pc) => {
-          const sender = pc.getSenders().find((item) => item.track?.kind === "video" || item.track === null);
-          if (sender) {
-            await sender.replaceTrack(videoTrack);
-            return;
-          }
-          pc.addTrack(videoTrack, stream);
-          needsNegotiation = true;
-        })
-      );
+      await syncVideoTrackToPeers(videoTrack);
       setVideoEnabled(true);
       refreshLocalStreamState();
-      if (needsNegotiation) await renegotiateAllPeers();
     } catch (error) {
       setMediaError("Camera permission is required for video.");
       throw error;
     }
-  }, [ensureMedia, refreshLocalStreamState, renegotiateAllPeers]);
+  }, [ensureMedia, refreshLocalStreamState, syncVideoTrackToPeers]);
 
   const stopVideo = useCallback(async () => {
     const stream = localStreamRef.current;
@@ -161,14 +196,7 @@ export function useWebRtcRoom(socket, roomId) {
       return;
     }
 
-    await Promise.all(
-      [...peersRef.current.values()].flatMap((pc) =>
-        pc
-          .getSenders()
-          .filter((sender) => sender.track?.kind === "video")
-          .map((sender) => sender.replaceTrack(null))
-      )
-    );
+    await syncVideoTrackToPeers(null);
 
     videoTracks.forEach((track) => {
       stream.removeTrack(track);
@@ -178,7 +206,7 @@ export function useWebRtcRoom(socket, roomId) {
     setVideoEnabled(false);
     setScreenSharing(false);
     refreshLocalStreamState();
-  }, [refreshLocalStreamState]);
+  }, [refreshLocalStreamState, syncVideoTrackToPeers]);
 
   const startScreenShare = useCallback(async () => {
     const stream = await ensureMedia();
@@ -196,30 +224,18 @@ export function useWebRtcRoom(socket, roomId) {
       });
       stream.addTrack(screenTrack);
 
-      let needsNegotiation = false;
-      await Promise.all(
-        [...peersRef.current.values()].map(async (pc) => {
-          const sender = pc.getSenders().find((item) => item.track?.kind === "video" || item.track === null);
-          if (sender) {
-            await sender.replaceTrack(screenTrack);
-            return;
-          }
-          pc.addTrack(screenTrack, stream);
-          needsNegotiation = true;
-        })
-      );
+      await syncVideoTrackToPeers(screenTrack);
       screenTrack.onended = () => {
         stopVideo().catch(() => {});
       };
       setVideoEnabled(true);
       setScreenSharing(true);
       refreshLocalStreamState();
-      if (needsNegotiation) await renegotiateAllPeers();
     } catch (error) {
       setMediaError("Screen share permission is required.");
       throw error;
     }
-  }, [ensureMedia, refreshLocalStreamState, renegotiateAllPeers, stopVideo]);
+  }, [ensureMedia, refreshLocalStreamState, stopVideo, syncVideoTrackToPeers]);
 
   const createPeer = useCallback(
     async (peerId, initiator = false) => {
@@ -230,7 +246,12 @@ export function useWebRtcRoom(socket, roomId) {
         iceServers: [{ urls: STUN_URL }]
       });
 
-      stream.getTracks().forEach((track) => pc.addTrack(track, stream));
+      stream.getAudioTracks().forEach((track) => pc.addTrack(track, stream));
+      const initialVideoTransceiver = pc.addTransceiver("video", { direction: "sendrecv" });
+      const currentVideoTrack = liveVideoTrack(stream);
+      if (currentVideoTrack) {
+        await initialVideoTransceiver.sender.replaceTrack(currentVideoTrack);
+      }
 
       pc.onicecandidate = (event) => {
         if (event.candidate) {
@@ -244,17 +265,32 @@ export function useWebRtcRoom(socket, roomId) {
 
       pc.oniceconnectionstatechange = () => {
         setPeerStates((current) => ({ ...current, [peerId]: pc.iceConnectionState }));
+        if (pc.iceConnectionState === "failed") {
+          pc.restartIce?.();
+          renegotiatePeer(peerId, pc).catch(() => {});
+        }
+      };
+
+      pc.onnegotiationneeded = () => {
+        renegotiatePeer(peerId, pc).catch(() => {});
       };
 
       pc.ontrack = (event) => {
         const remoteStream = event.streams[0];
         const displayStream = peerStreamsRef.current.get(peerId) || new MediaStream();
+        if (event.track.kind === "video") {
+          displayStream.getVideoTracks().forEach((track) => {
+            if (track.id !== event.track.id) displayStream.removeTrack(track);
+          });
+        }
         if (!displayStream.getTracks().some((track) => track.id === event.track.id)) {
           displayStream.addTrack(event.track);
         }
         peerStreamsRef.current.set(peerId, displayStream);
         displayStream.onremovetrack = refreshRemoteStreamsState;
         event.track.onended = refreshRemoteStreamsState;
+        event.track.onmute = refreshRemoteStreamsState;
+        event.track.onunmute = refreshRemoteStreamsState;
         refreshRemoteStreamsState();
 
         let audio = audioRef.current.get(peerId);
@@ -273,14 +309,12 @@ export function useWebRtcRoom(socket, roomId) {
       peersRef.current.set(peerId, pc);
 
       if (initiator) {
-        const offer = await pc.createOffer();
-        await pc.setLocalDescription(offer);
-        socket.emit("webrtc:offer", { to: peerId, description: pc.localDescription });
+        await renegotiatePeer(peerId, pc);
       }
 
       return pc;
     },
-    [ensureMedia, refreshRemoteStreamsState, socket]
+    [ensureMedia, refreshRemoteStreamsState, renegotiatePeer, socket]
   );
 
   const connectToPeers = useCallback(
@@ -358,10 +392,14 @@ export function useWebRtcRoom(socket, roomId) {
     const pendingCandidates = pendingCandidatesRef.current;
     const audios = audioRef.current;
     const peerStreams = peerStreamsRef.current;
+    const negotiating = negotiatingRef.current;
+    const negotiationQueue = negotiationQueueRef.current;
     return () => {
       peers.forEach((pc) => pc.close());
       peers.clear();
       pendingCandidates.clear();
+      negotiating.clear();
+      negotiationQueue.clear();
       localStreamRef.current?.getTracks().forEach((track) => track.stop());
       localStreamRef.current = null;
       peerStreams.clear();

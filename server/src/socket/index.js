@@ -33,6 +33,26 @@ function emitParticipants(io, roomId) {
   return participants;
 }
 
+function reactionCounts(reactions = {}) {
+  const entries = reactions instanceof Map ? [...reactions.entries()] : Object.entries(reactions);
+  return Object.fromEntries(entries.map(([emoji, users]) => [emoji, Array.isArray(users) ? users.length : Number(users) || 0]));
+}
+
+function publicMessage(message) {
+  const deleted = Boolean(message.deletedAt);
+  return {
+    id: message._id.toString(),
+    roomId: message.roomId,
+    username: message.username,
+    message: deleted ? "" : message.message,
+    attachments: deleted ? [] : message.attachments || [],
+    reactions: deleted ? {} : reactionCounts(message.reactions),
+    editedAt: message.editedAt || null,
+    deletedAt: message.deletedAt || null,
+    timestamp: message.timestamp
+  };
+}
+
 function cancelEmptyRoomCleanup(roomId) {
   const timer = emptyRoomTimers.get(roomId);
   if (!timer) return;
@@ -160,21 +180,83 @@ export function registerSocketHandlers(io) {
           timestamp: new Date()
         });
 
-        const payload = {
-          id: saved._id.toString(),
-          roomId: normalizedRoomId,
-          username: saved.username,
-          message: saved.message,
-          attachments: saved.attachments || [],
-          reactions: {},
-          timestamp: saved.timestamp
-        };
+        const payload = publicMessage(saved);
 
         io.to(normalizedRoomId).emit("chat:message", payload);
         ack?.({ ok: true, message: payload });
         await touchRoom(normalizedRoomId, userMap.size);
       } catch (error) {
         ack?.({ ok: false, error: "Message failed" });
+      }
+    });
+
+    socket.on("chat:edit", async ({ roomId, messageId, message }, ack) => {
+      try {
+        const normalizedRoomId = String(roomId || socket.data.roomId || "").toUpperCase();
+        const userMap = rooms.get(normalizedRoomId);
+        if (!userMap?.has(socket.id)) return;
+        if (!mongoose.isValidObjectId(messageId)) return;
+
+        const cleanMessage = cleanText(message, 1000);
+        if (!cleanMessage) {
+          ack?.({ ok: false, error: "Message cannot be empty" });
+          return;
+        }
+
+        const saved = await Message.findOne({
+          _id: messageId,
+          roomId: normalizedRoomId,
+          username: socket.data.username,
+          deletedAt: null
+        });
+        if (!saved) {
+          ack?.({ ok: false, error: "Message not found" });
+          return;
+        }
+
+        saved.message = cleanMessage;
+        saved.editedAt = new Date();
+        await saved.save();
+
+        const payload = publicMessage(saved);
+        io.to(normalizedRoomId).emit("chat:update", payload);
+        ack?.({ ok: true, message: payload });
+        await touchRoom(normalizedRoomId, userMap.size);
+      } catch (error) {
+        ack?.({ ok: false, error: "Edit failed" });
+      }
+    });
+
+    socket.on("chat:delete", async ({ roomId, messageId }, ack) => {
+      try {
+        const normalizedRoomId = String(roomId || socket.data.roomId || "").toUpperCase();
+        const userMap = rooms.get(normalizedRoomId);
+        if (!userMap?.has(socket.id)) return;
+        if (!mongoose.isValidObjectId(messageId)) return;
+
+        const saved = await Message.findOne({
+          _id: messageId,
+          roomId: normalizedRoomId,
+          username: socket.data.username,
+          deletedAt: null
+        });
+        if (!saved) {
+          ack?.({ ok: false, error: "Message not found" });
+          return;
+        }
+
+        saved.message = "";
+        saved.attachments = [];
+        saved.reactions = new Map();
+        saved.deletedAt = new Date();
+        await saved.save();
+
+        const payload = publicMessage(saved);
+        io.to(normalizedRoomId).emit("chat:update", payload);
+        ack?.({ ok: true, message: payload });
+        await touchRoom(normalizedRoomId, userMap.size);
+      } catch (error) {
+        ack?.({ ok: false, error: "Delete failed" });
       }
     });
 
@@ -189,6 +271,7 @@ export function registerSocketHandlers(io) {
 
       const message = await Message.findOne({ _id: messageId, roomId: normalizedRoomId });
       if (!message) return;
+      if (message.deletedAt) return;
       const username = socket.data.username;
       const currentForEmoji = new Set(message.reactions?.get(cleanEmoji) || []);
       const isRemovingCurrentReaction = currentForEmoji.has(username);
@@ -265,8 +348,11 @@ export function registerSocketHandlers(io) {
       const normalizedRoomId = String(roomId || socket.data.roomId || "").toUpperCase();
       const user = rooms.get(normalizedRoomId)?.get(socket.id);
       if (!user) return;
-      user.screenSharing = Boolean(sharing);
-      user.video = Boolean(sharing) || user.video;
+      const nextSharing = Boolean(sharing);
+      const wasSharing = Boolean(user.screenSharing);
+      user.screenSharing = nextSharing;
+      if (nextSharing) user.video = true;
+      else if (wasSharing) user.video = false;
       emitParticipants(io, normalizedRoomId);
     });
 

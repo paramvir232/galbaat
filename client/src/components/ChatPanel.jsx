@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import DOMPurify from "dompurify";
-import { Download, File as FileIcon, Loader2, Mic, Plus, Send, Smile, Square, X } from "lucide-react";
+import { Check, Download, Edit3, File as FileIcon, Loader2, Mic, Plus, Send, Smile, Square, Trash2, X } from "lucide-react";
 import { apiAssetUrl } from "../lib/api";
 import { formatTime } from "../lib/time";
 
@@ -43,6 +43,8 @@ export default function ChatPanel({
   onSend,
   onUploadFile,
   onReact,
+  onEdit,
+  onDelete,
   onTypingStart,
   onTypingStop
 }) {
@@ -50,6 +52,8 @@ export default function ChatPanel({
   const [showEmojis, setShowEmojis] = useState(false);
   const [reactionPickerId, setReactionPickerId] = useState(null);
   const [recording, setRecording] = useState(false);
+  const [pendingAttachment, setPendingAttachment] = useState(null);
+  const [editingMessage, setEditingMessage] = useState(null);
   const [imagePreview, setImagePreview] = useState(null);
   const endRef = useRef(null);
   const fileInputRef = useRef(null);
@@ -61,6 +65,32 @@ export default function ChatPanel({
     endRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
   }, [messages]);
 
+  useEffect(() => {
+    return () => {
+      if (pendingAttachment?.url) window.URL.revokeObjectURL(pendingAttachment.url);
+    };
+  }, [pendingAttachment]);
+
+  function queueAttachment(file) {
+    setShowEmojis(false);
+    setPendingAttachment((current) => {
+      if (current?.url) window.URL.revokeObjectURL(current.url);
+      return {
+        file,
+        url: window.URL.createObjectURL(file),
+        kind: attachmentKind({ mimeType: file.type }),
+        name: file.name || "attachment"
+      };
+    });
+  }
+
+  function clearPendingAttachment() {
+    setPendingAttachment((current) => {
+      if (current?.url) window.URL.revokeObjectURL(current.url);
+      return null;
+    });
+  }
+
   function handleChange(event) {
     setValue(event.target.value);
     onTypingStart();
@@ -71,6 +101,15 @@ export default function ChatPanel({
   function submit(event) {
     event.preventDefault();
     const clean = DOMPurify.sanitize(value.trim(), { ALLOWED_TAGS: [], ALLOWED_ATTR: [] });
+    if (pendingAttachment) {
+      onUploadFile(pendingAttachment.file, { chatOnly: true, message: clean });
+      clearPendingAttachment();
+      setValue("");
+      setShowEmojis(false);
+      onTypingStop();
+      return;
+    }
+
     if (!clean) return;
     onSend(clean);
     setValue("");
@@ -80,7 +119,7 @@ export default function ChatPanel({
 
   function handleFileChange(event) {
     const [file] = event.target.files || [];
-    if (file) onUploadFile(file, { chatOnly: true });
+    if (file) queueAttachment(file);
     event.target.value = "";
   }
 
@@ -96,8 +135,7 @@ export default function ChatPanel({
       type: file.type,
       lastModified: file.lastModified || Date.now()
     });
-    onUploadFile(namedFile, { chatOnly: true });
-    setShowEmojis(false);
+    queueAttachment(namedFile);
   }
 
   async function toggleRecording() {
@@ -123,7 +161,7 @@ export default function ChatPanel({
         const file = new window.File([blob], `voice-note-${new Date().toISOString().replace(/[:.]/g, "-")}.${extension}`, {
           type: blob.type || "audio/webm"
         });
-        onUploadFile(file, { chatOnly: true });
+        queueAttachment(file);
       };
       recorder.start();
       setRecording(true);
@@ -168,9 +206,59 @@ export default function ChatPanel({
     );
   }
 
+  function renderPendingAttachment() {
+    if (!pendingAttachment) return null;
+
+    if (pendingAttachment.kind === "image") {
+      return (
+        <button
+          type="button"
+          onClick={() => setImagePreview({ url: pendingAttachment.url, name: pendingAttachment.name })}
+          className="block max-h-56 w-full overflow-hidden rounded-md border border-line bg-ink/70"
+        >
+          <img src={pendingAttachment.url} alt={pendingAttachment.name} className="max-h-56 w-full object-contain" />
+        </button>
+      );
+    }
+
+    if (pendingAttachment.kind === "audio") {
+      return <audio controls src={pendingAttachment.url} className="w-full" />;
+    }
+
+    return (
+      <div className="flex items-center gap-2 rounded-md border border-line bg-ink/70 px-3 py-2 text-sm text-slate-200">
+        <FileIcon className="h-4 w-4 shrink-0 text-skyglass" />
+        <span className="min-w-0 flex-1 truncate">{pendingAttachment.name}</span>
+        <span className="text-xs text-slate-500">{formatBytes(pendingAttachment.file.size)}</span>
+      </div>
+    );
+  }
+
   function reactToMessage(messageId, emoji) {
     setReactionPickerId(null);
     onReact?.(messageId, emoji);
+  }
+
+  function startEditing(message) {
+    setReactionPickerId(null);
+    setEditingMessage({ id: message.id, value: message.message || "" });
+  }
+
+  function saveEdit() {
+    const clean = DOMPurify.sanitize((editingMessage?.value || "").trim(), { ALLOWED_TAGS: [], ALLOWED_ATTR: [] });
+    if (!editingMessage?.id || !clean) return;
+    onEdit?.(editingMessage.id, clean);
+    setEditingMessage(null);
+  }
+
+  function cancelEdit() {
+    setEditingMessage(null);
+  }
+
+  function deleteOwnMessage(messageId) {
+    setReactionPickerId(null);
+    if (editingMessage?.id === messageId) setEditingMessage(null);
+    onDelete?.(messageId);
   }
 
   return (
@@ -186,28 +274,104 @@ export default function ChatPanel({
 
       <div className="scrollbar-thin min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain p-3 sm:p-4">
         {messages.map((message) => {
-          const mentioned = currentUsername && message.message?.toLowerCase().includes(`@${currentUsername.toLowerCase()}`);
+          const isSystem = message.username === "System";
+          const isOwn = !isSystem && currentUsername && message.username === currentUsername;
+          const isDeleted = Boolean(message.deletedAt);
+          const mentioned = !isOwn && currentUsername && message.message?.toLowerCase().includes(`@${currentUsername.toLowerCase()}`);
           const visibleReactions = reactionEntries(message.reactions);
-          const reactionAllowed = canReactToMessage(message);
+          const reactionAllowed = canReactToMessage(message) && !isDeleted;
+          const canManage = isOwn && reactionAllowed;
+          const isEditing = editingMessage?.id === message.id;
           return (
             <div
               key={message.id || `${message.username}-${message.timestamp}`}
+              className={`flex ${isSystem ? "justify-center" : isOwn ? "justify-end" : "justify-start"} ${visibleReactions.length ? "mb-4" : ""}`}
+            >
+            <div
               onMouseEnter={() => {
                 if (reactionAllowed) setReactionPickerId(message.id);
               }}
               onMouseLeave={() => setReactionPickerId((id) => (id === message.id ? null : id))}
-              className={`group relative rounded-lg border p-3 ${visibleReactions.length ? "mb-4" : ""} ${mentioned ? "border-amberglow/40 bg-amberglow/10" : "border-transparent bg-white/[0.04]"}`}
+              className={`group relative max-w-[88%] rounded-lg border p-3 sm:max-w-[82%] ${
+                isSystem
+                  ? "border-transparent bg-white/[0.03] text-center"
+                  : mentioned
+                    ? "border-amberglow/40 bg-amberglow/10"
+                    : isOwn
+                      ? "rounded-br-sm border-mint/20 bg-mint/15"
+                      : "rounded-bl-sm border-transparent bg-white/[0.04]"
+              } ${isDeleted ? "border-dashed bg-white/[0.025]" : ""}`}
             >
               <div className="mb-1 flex items-center justify-between gap-3">
-                <span className="truncate text-sm font-semibold text-slate-100">{message.username}</span>
-                <time className="shrink-0 text-[11px] text-slate-500">{formatTime(message.timestamp)}</time>
+                <span className={`truncate text-sm font-semibold ${isOwn ? "text-mint" : "text-slate-100"}`}>{isOwn ? "You" : message.username}</span>
+                <span className="flex shrink-0 items-center gap-1">
+                  {canManage && !isEditing && (
+                    <span className="flex items-center gap-0.5 opacity-0 transition group-hover:opacity-100 group-focus-within:opacity-100">
+                      <button
+                        type="button"
+                        onClick={() => startEditing(message)}
+                        title="Edit message"
+                        className="grid h-7 w-7 place-items-center rounded-md text-slate-400 hover:bg-white/10 hover:text-slate-100"
+                      >
+                        <Edit3 className="h-3.5 w-3.5" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => deleteOwnMessage(message.id)}
+                        title="Delete message"
+                        className="grid h-7 w-7 place-items-center rounded-md text-slate-400 hover:bg-white/10 hover:text-red-200"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </button>
+                    </span>
+                  )}
+                  <time className="text-[11px] text-slate-500">{formatTime(message.timestamp)}</time>
+                </span>
               </div>
-              {message.message && <p className="break-anywhere text-sm leading-6 text-slate-300 [overflow-wrap:anywhere]">{message.message}</p>}
-              {(message.attachments || []).map((file) => (
-                <div key={file.id}>{renderAttachment(file)}</div>
-              ))}
+              {isDeleted ? (
+                <p className="break-anywhere text-sm italic leading-6 text-slate-500 [overflow-wrap:anywhere]">This message was deleted</p>
+              ) : isEditing ? (
+                <div className="space-y-2">
+                  <textarea
+                    value={editingMessage.value}
+                    onChange={(event) => setEditingMessage((current) => ({ ...current, value: event.target.value }))}
+                    maxLength={1000}
+                    rows={3}
+                    className="min-h-20 w-full resize-none rounded-md border border-line bg-ink/70 p-2 text-sm text-slate-100 outline-none focus:border-mint/60"
+                    autoFocus
+                  />
+                  <div className="flex justify-end gap-2">
+                    <button
+                      type="button"
+                      onClick={cancelEdit}
+                      className="grid h-8 w-8 place-items-center rounded-md border border-line text-slate-300 hover:bg-white/10"
+                      title="Cancel edit"
+                    >
+                      <X className="h-4 w-4" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={saveEdit}
+                      className="grid h-8 w-8 place-items-center rounded-md bg-mint text-ink hover:bg-mint/90"
+                      title="Save edit"
+                    >
+                      <Check className="h-4 w-4" />
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <>
+                  {message.message && <p className="break-anywhere text-sm leading-6 text-slate-200 [overflow-wrap:anywhere]">{message.message}</p>}
+                  {(message.attachments || []).map((file) => (
+                    <div key={file.id}>{renderAttachment(file)}</div>
+                  ))}
+                  {message.editedAt && (
+                    <div className="mt-1 text-right text-[11px] text-slate-500">edited</div>
+                  )}
+                </>
+              )}
               {visibleReactions.length > 0 && (
-                <div className="absolute -bottom-3 right-3 flex max-w-[calc(100%-1.5rem)] flex-wrap justify-end gap-1">
+                <div className={`absolute -bottom-3 flex max-w-[calc(100%-1.5rem)] flex-wrap gap-1 ${isOwn ? "right-3 justify-end" : "left-3 justify-start"}`}>
                   {visibleReactions.map(([emoji, count]) => (
                   <button
                     key={emoji}
@@ -222,7 +386,7 @@ export default function ChatPanel({
                 </div>
               )}
               {reactionPickerId === message.id && (
-              <div className="absolute -bottom-4 right-3 z-20 flex rounded-full border border-line bg-panel/95 p-1 shadow-xl">
+              <div className={`absolute -bottom-4 z-20 flex rounded-full border border-line bg-panel/95 p-1 shadow-xl ${isOwn ? "right-3" : "left-3"}`}>
                 {REACTION_OPTIONS.map((emoji) => (
                   <button
                     key={emoji}
@@ -236,6 +400,7 @@ export default function ChatPanel({
                 ))}
               </div>
               )}
+            </div>
             </div>
           );
         })}
@@ -258,6 +423,22 @@ export default function ChatPanel({
             ))}
           </div>
         )}
+        {pendingAttachment && (
+          <div className="mb-3 rounded-lg border border-line bg-white/[0.04] p-3">
+            <div className="mb-2 flex items-center justify-between gap-3">
+              <span className="min-w-0 truncate text-xs font-semibold uppercase text-slate-400">{pendingAttachment.name}</span>
+              <button
+                type="button"
+                onClick={clearPendingAttachment}
+                title="Remove attachment"
+                className="grid h-8 w-8 shrink-0 place-items-center rounded-md text-slate-400 hover:bg-white/10 hover:text-slate-100"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            {renderPendingAttachment()}
+          </div>
+        )}
         <div className="flex min-w-0 items-center gap-1 rounded-lg border border-line bg-ink/50 p-2 sm:gap-2">
           <button
             type="button"
@@ -277,7 +458,7 @@ export default function ChatPanel({
           <button
             type="button"
             title="Attach file"
-            disabled={fileUploading}
+            disabled={fileUploading || Boolean(pendingAttachment)}
             onClick={() => fileInputRef.current?.click()}
             className="grid h-10 w-9 shrink-0 place-items-center rounded-md text-slate-400 hover:bg-white/[0.08] hover:text-slate-100 disabled:cursor-not-allowed disabled:opacity-50 sm:w-10"
           >
@@ -296,7 +477,8 @@ export default function ChatPanel({
           <button
             type="submit"
             title="Send"
-            className="grid h-10 w-9 shrink-0 place-items-center rounded-md bg-mint text-ink hover:bg-mint/90 sm:w-10"
+            disabled={fileUploading}
+            className="grid h-10 w-9 shrink-0 place-items-center rounded-md bg-mint text-ink hover:bg-mint/90 disabled:cursor-not-allowed disabled:opacity-60 sm:w-10"
           >
             <Send className="h-4 w-4" />
           </button>
