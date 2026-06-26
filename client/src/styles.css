@@ -16,6 +16,10 @@ body,
   min-height: 100%;
 }
 
+html {
+  overflow-x: hidden;
+}
+
 body {
   margin: 0;
   background:
@@ -23,11 +27,24 @@ body {
     radial-gradient(circle at 85% 12%, rgba(138, 180, 255, 0.14), transparent 25%),
     linear-gradient(135deg, #0c111d 0%, #101624 44%, #151827 100%);
   color: #e5edf7;
+  overflow-x: hidden;
 }
 
 button,
 input {
   font: inherit;
+}
+
+button,
+a {
+  -webkit-tap-highlight-color: transparent;
+}
+
+img,
+video,
+canvas,
+svg {
+  max-width: 100%;
 }
 
 .glass {

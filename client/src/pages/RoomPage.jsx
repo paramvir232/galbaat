@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { motion } from "framer-motion";
-import { ArrowLeft, FileText, Hand, Hash, Loader2, Lock, Megaphone, Menu, Pin, Radio, ScreenShare, ScreenShareOff, Unlock, Video, VideoOff, Wifi, WifiOff, X } from "lucide-react";
+import { ArrowLeft, FileText, Hand, Hash, Loader2, Lock, Menu, Radio, ScreenShare, ScreenShareOff, Unlock, Video, VideoOff, Wifi, WifiOff, X } from "lucide-react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import ChatPanel from "../components/ChatPanel.jsx";
 import ParticipantList from "../components/ParticipantList.jsx";
@@ -47,9 +47,8 @@ export default function RoomPage() {
   const [micLocked, setMicLocked] = useState(false);
   const [fileUploading, setFileUploading] = useState(false);
   const [videoBusy, setVideoBusy] = useState(false);
-  const [mobilePanel, setMobilePanel] = useState(null);
+  const [mobilePanel, setMobilePanel] = useState("room");
   const [handRaised, setHandRaised] = useState(false);
-  const [noticeDraft, setNoticeDraft] = useState("");
   const [unreadCount, setUnreadCount] = useState(0);
   const speakingRef = useRef(false);
   const micLockedRef = useRef(false);
@@ -120,7 +119,6 @@ export default function RoomPage() {
           getFiles(roomId)
         ]);
         setRoom(loadedRoom);
-        setNoticeDraft(loadedRoom.pinnedNotice || "");
         setMessages(history);
         setFiles(roomFiles);
       } catch (err) {
@@ -217,10 +215,6 @@ export default function RoomPage() {
         return next;
       });
     }
-    function onNotice({ pinnedNotice }) {
-      setRoom((current) => (current ? { ...current, pinnedNotice } : current));
-      setNoticeDraft(pinnedNotice || "");
-    }
     function onLock({ locked }) {
       setRoom((current) => (current ? { ...current, locked } : current));
     }
@@ -247,7 +241,6 @@ export default function RoomPage() {
     socket.on("file:uploaded", onFileUploaded);
     socket.on("typing:start", onTypingStart);
     socket.on("typing:stop", onTypingStop);
-    socket.on("room:notice", onNotice);
     socket.on("room:lock", onLock);
     socket.on("host:muted", onMutedByHost);
     socket.on("host:kicked", onKicked);
@@ -265,7 +258,6 @@ export default function RoomPage() {
       socket.off("file:uploaded", onFileUploaded);
       socket.off("typing:start", onTypingStart);
       socket.off("typing:stop", onTypingStop);
-      socket.off("room:notice", onNotice);
       socket.off("room:lock", onLock);
       socket.off("host:muted", onMutedByHost);
       socket.off("host:kicked", onKicked);
@@ -318,10 +310,6 @@ export default function RoomPage() {
     const next = !handRaised;
     setHandRaised(next);
     socket.emit("participant:hand", { roomId, raised: next });
-  }
-
-  function saveNotice() {
-    socket.emit("room:notice", { roomId, notice: noticeDraft });
   }
 
   function toggleLock() {
@@ -427,9 +415,9 @@ export default function RoomPage() {
   const isHost = Boolean(self?.host);
 
   return (
-    <main className="flex h-dvh min-h-0 flex-col overflow-hidden p-3 text-slate-100 sm:p-4">
-      <header className="glass mb-3 flex shrink-0 flex-wrap items-center justify-between gap-3 rounded-lg px-4 py-3">
-        <div className="flex min-w-0 items-center gap-3">
+    <main className="flex h-dvh min-h-0 flex-col overflow-hidden p-2 text-slate-100 sm:p-4">
+      <header className="glass mb-2 flex shrink-0 flex-wrap items-center justify-between gap-2 rounded-lg px-3 py-3 sm:mb-3 sm:gap-3 sm:px-4">
+        <div className="flex min-w-[12rem] flex-1 items-center gap-2 sm:gap-3">
           <Link to="/" className="grid h-10 w-10 shrink-0 place-items-center rounded-md border border-line bg-white/[0.04] text-slate-300 hover:bg-white/10">
             <ArrowLeft className="h-4 w-4" />
           </Link>
@@ -442,7 +430,7 @@ export default function RoomPage() {
           </div>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center justify-end gap-2">
           <StatusPill tone={statusTone}>
             {status === "connected" ? "Connected" : status === "voice-limited" ? "Chat connected" : "Reconnecting"}
           </StatusPill>
@@ -467,26 +455,29 @@ export default function RoomPage() {
           )}
           <button
             type="button"
-            onClick={() => setMobilePanel((panel) => (panel ? null : "menu"))}
+            onClick={() => setMobilePanel((panel) => (panel === "room" ? "chat" : "room"))}
             className="grid h-10 w-10 place-items-center rounded-md border border-line bg-white/[0.05] md:hidden"
           >
-            {mobilePanel ? <X className="h-4 w-4" /> : <Menu className="h-4 w-4" />}
+            {mobilePanel === "room" ? <Menu className="h-4 w-4" /> : <X className="h-4 w-4" />}
           </button>
         </div>
       </header>
 
-      <section className="grid min-h-0 flex-1 gap-3 overflow-hidden md:grid-cols-[270px_minmax(0,1fr)_340px]">
-        <div className={`${mobilePanel === "participants" || !mobilePanel ? "block" : "hidden"} min-h-0 overflow-hidden md:block`}>
+      <section className="grid min-h-0 flex-1 gap-2 overflow-hidden lg:grid-cols-[260px_minmax(0,1fr)_330px] xl:grid-cols-[280px_minmax(0,1fr)_360px]">
+        <div className={`${mobilePanel === "participants" ? "block" : "hidden"} min-h-0 overflow-hidden lg:block`}>
           <ParticipantList participants={participants} selfId={self?.id} isHost={isHost} onHostMute={hostMute} onKick={kickParticipant} />
         </div>
 
-        <motion.div layout className="glass flex min-h-[380px] flex-col items-center justify-center gap-5 overflow-hidden rounded-lg p-4 sm:p-6">
-          <div className="flex flex-wrap items-center justify-center gap-3">
-            <div className="inline-flex items-center gap-2 rounded-full border border-line bg-white/[0.04] px-4 py-2 text-sm text-slate-300">
+        <motion.div
+          layout
+          className={`${mobilePanel === "room" ? "flex" : "hidden"} glass min-h-0 flex-col items-center gap-4 overflow-y-auto rounded-lg p-3 sm:gap-5 sm:p-5 lg:flex xl:p-6`}
+        >
+          <div className="flex w-full flex-wrap items-center justify-center gap-2 sm:gap-3">
+            <div className="inline-flex items-center gap-2 rounded-full border border-line bg-white/[0.04] px-3 py-2 text-xs text-slate-300 sm:px-4 sm:text-sm">
               {connected ? <Wifi className="h-4 w-4 text-mint" /> : <WifiOff className="h-4 w-4 text-amberglow" />}
               {participants.length} online
             </div>
-            <div className="inline-flex items-center gap-2 rounded-full border border-line bg-white/[0.04] px-4 py-2 text-sm text-slate-300">
+            <div className="inline-flex items-center gap-2 rounded-full border border-line bg-white/[0.04] px-3 py-2 text-xs text-slate-300 sm:px-4 sm:text-sm">
               <Radio className={`h-4 w-4 ${audioEnabled ? "text-mint" : "text-slate-500"}`} />
               {audioEnabled ? "Broadcasting" : "Listening"}
             </div>
@@ -494,7 +485,7 @@ export default function RoomPage() {
               type="button"
               disabled={!connected || videoBusy}
               onClick={toggleVideo}
-              className={`inline-flex items-center gap-2 rounded-full border px-4 py-2 text-sm font-medium transition disabled:cursor-not-allowed disabled:opacity-60 ${
+              className={`inline-flex items-center gap-2 rounded-full border px-3 py-2 text-xs font-medium transition disabled:cursor-not-allowed disabled:opacity-60 sm:px-4 sm:text-sm ${
                 videoEnabled ? "border-mint/40 bg-mint/10 text-mint" : "border-line bg-white/[0.04] text-slate-300 hover:bg-white/10"
               }`}
             >
@@ -505,7 +496,7 @@ export default function RoomPage() {
               type="button"
               disabled={!connected || videoBusy}
               onClick={toggleScreenShare}
-              className={`inline-flex items-center gap-2 rounded-full border px-4 py-2 text-sm font-medium transition disabled:cursor-not-allowed disabled:opacity-60 ${
+              className={`inline-flex items-center gap-2 rounded-full border px-3 py-2 text-xs font-medium transition disabled:cursor-not-allowed disabled:opacity-60 sm:px-4 sm:text-sm ${
                 screenSharing ? "border-mint/40 bg-mint/10 text-mint" : "border-line bg-white/[0.04] text-slate-300 hover:bg-white/10"
               }`}
             >
@@ -514,32 +505,7 @@ export default function RoomPage() {
             </button>
           </div>
 
-          {(room?.pinnedNotice || isHost) && (
-            <div className="w-full max-w-3xl rounded-lg border border-line bg-white/[0.04] p-3">
-              <div className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase text-slate-400">
-                <Pin className="h-3.5 w-3.5 text-amberglow" />
-                Room Notice
-              </div>
-              {isHost ? (
-                <div className="flex gap-2">
-                  <input
-                    value={noticeDraft}
-                    onChange={(event) => setNoticeDraft(event.target.value)}
-                    maxLength={240}
-                    placeholder="Pin a topic, agenda, or room rule"
-                    className="min-w-0 flex-1 rounded-md border border-line bg-ink/60 px-3 py-2 text-sm text-slate-100 outline-none placeholder:text-slate-500"
-                  />
-                  <button type="button" onClick={saveNotice} className="grid h-10 w-10 shrink-0 place-items-center rounded-md bg-mint text-ink hover:bg-mint/90" title="Save notice">
-                    <Megaphone className="h-4 w-4" />
-                  </button>
-                </div>
-              ) : (
-                <p className="text-sm text-slate-200">{room.pinnedNotice}</p>
-              )}
-            </div>
-          )}
-
-          {hasVideo && <VideoGrid localStream={localStream} remoteStreams={remoteStreams} participants={participants} selfId={self?.id} />}
+          {hasVideo && <VideoGrid localStream={localStream} remoteStreams={remoteStreams} participants={participants} selfId={self?.id} screenSharing={screenSharing} />}
 
           <PushToTalk
             active={speaking}
@@ -578,7 +544,7 @@ export default function RoomPage() {
           )}
         </motion.div>
 
-        <div className={`${mobilePanel === "chat" || !mobilePanel ? "block" : "hidden"} min-h-0 overflow-hidden md:block`}>
+        <div className={`${mobilePanel === "chat" ? "block" : "hidden"} min-h-0 overflow-hidden lg:block`}>
           <ChatPanel
             messages={messages}
             files={files}
@@ -594,18 +560,25 @@ export default function RoomPage() {
         </div>
       </section>
 
-      <nav className="mt-3 grid shrink-0 grid-cols-2 gap-2 md:hidden">
+      <nav className="mt-2 grid shrink-0 grid-cols-3 gap-2 pb-[var(--safe-bottom)] lg:hidden">
+        <button
+          type="button"
+          onClick={() => setMobilePanel("room")}
+          className={`rounded-md border px-3 py-3 text-sm ${mobilePanel === "room" ? "border-mint/40 bg-mint/10 text-mint" : "border-line bg-white/[0.05] text-slate-200"}`}
+        >
+          Room
+        </button>
         <button
           type="button"
           onClick={() => setMobilePanel("participants")}
-          className="rounded-md border border-line bg-white/[0.05] px-3 py-3 text-sm text-slate-200"
+          className={`rounded-md border px-3 py-3 text-sm ${mobilePanel === "participants" ? "border-mint/40 bg-mint/10 text-mint" : "border-line bg-white/[0.05] text-slate-200"}`}
         >
-          Participants
+          People
         </button>
         <button
           type="button"
           onClick={() => setMobilePanel("chat")}
-          className="rounded-md border border-line bg-white/[0.05] px-3 py-3 text-sm text-slate-200"
+          className={`rounded-md border px-3 py-3 text-sm ${mobilePanel === "chat" ? "border-mint/40 bg-mint/10 text-mint" : "border-line bg-white/[0.05] text-slate-200"}`}
         >
           Chat{unreadCount ? ` (${unreadCount})` : ""}
         </button>

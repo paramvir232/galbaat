@@ -36,15 +36,15 @@ export default function LandingPage() {
   }
 
   return (
-    <main className="min-h-screen overflow-hidden px-4 py-6 text-slate-100 sm:px-6 lg:px-8">
-      <div className="mx-auto flex min-h-[calc(100vh-3rem)] max-w-6xl flex-col">
-        <nav className="flex items-center justify-between">
+    <main className="min-h-screen overflow-x-hidden px-4 py-4 text-slate-100 sm:px-6 sm:py-6 lg:px-8">
+      <div className="mx-auto flex min-h-[calc(100vh-2rem)] max-w-6xl flex-col sm:min-h-[calc(100vh-3rem)]">
+        <nav className="flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-center gap-3">
-            <div className="grid h-11 w-11 place-items-center rounded-lg bg-mint text-ink">
-              <Radio className="h-6 w-6" />
+            <div className="grid h-10 w-10 place-items-center rounded-lg bg-mint text-ink sm:h-11 sm:w-11">
+              <Radio className="h-5 w-5 sm:h-6 sm:w-6" />
             </div>
             <div>
-              <p className="text-xl font-black tracking-normal">GalBaat</p>
+              <p className="text-lg font-black tracking-normal sm:text-xl">GalBaat</p>
               <p className="text-xs text-slate-400">Live rooms, instant voice</p>
             </div>
           </div>
@@ -53,22 +53,22 @@ export default function LandingPage() {
           </span>
         </nav>
 
-        <section className="grid flex-1 items-center gap-8 py-10 lg:grid-cols-[1.08fr_0.92fr]">
+        <section className="grid flex-1 items-center gap-6 py-8 sm:py-10 lg:grid-cols-[1.08fr_0.92fr]">
           <motion.div initial={{ opacity: 0, y: 18 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5 }}>
-            <div className="mb-6 inline-flex items-center gap-2 rounded-full border border-line bg-white/[0.05] px-4 py-2 text-sm text-slate-300">
+            <div className="mb-5 inline-flex max-w-full items-center gap-2 rounded-full border border-line bg-white/[0.05] px-3 py-2 text-xs text-slate-300 sm:mb-6 sm:px-4 sm:text-sm">
               <Sparkles className="h-4 w-4 text-amberglow" />
-              Walkie-talkie rooms for teams, friends, and quick ops
+              <span className="min-w-0 truncate">Walkie-talkie rooms for teams, friends, and quick ops</span>
             </div>
-            <h1 className="max-w-3xl text-5xl font-black leading-[1.02] tracking-normal text-white sm:text-6xl lg:text-7xl">
+            <h1 className="max-w-3xl py-1 text-4xl font-black !leading-[1.15] tracking-normal text-white sm:text-6xl lg:text-7xl">
               GalBaat
             </h1>
-            <p className="mt-6 max-w-2xl text-lg leading-8 text-slate-300">
+            <p className="mt-4 max-w-2xl text-base leading-7 text-slate-300 sm:mt-6 sm:text-lg sm:leading-8">
               Create a room, share the link, and hold to talk. Voice, chat, participant presence, and room history are ready the moment people arrive.
             </p>
 
-            <div className="mt-8 grid max-w-2xl grid-cols-3 gap-3 text-sm text-slate-300">
+            <div className="mt-6 grid max-w-2xl grid-cols-1 gap-2 text-sm text-slate-300 min-[420px]:grid-cols-3 sm:mt-8 sm:gap-3">
               {["Push-to-talk", "WebRTC voice", "Live chat"].map((item) => (
-                <div key={item} className="rounded-lg border border-line bg-white/[0.04] px-4 py-3 text-center">
+                <div key={item} className="rounded-lg border border-line bg-white/[0.04] px-3 py-3 text-center sm:px-4">
                   {item}
                 </div>
               ))}
@@ -79,11 +79,11 @@ export default function LandingPage() {
             initial={{ opacity: 0, scale: 0.98 }}
             animate={{ opacity: 1, scale: 1 }}
             transition={{ duration: 0.5, delay: 0.1 }}
-            className="glass rounded-lg p-5 shadow-2xl"
+            className="glass rounded-lg p-4 shadow-2xl sm:p-5"
           >
             <div className="mb-5 flex items-center gap-3">
-              <div className="grid h-12 w-12 place-items-center rounded-lg bg-skyglass/15 text-skyglass">
-                <Headphones className="h-6 w-6" />
+              <div className="grid h-11 w-11 shrink-0 place-items-center rounded-lg bg-skyglass/15 text-skyglass sm:h-12 sm:w-12">
+                <Headphones className="h-5 w-5 sm:h-6 sm:w-6" />
               </div>
               <div>
                 <h2 className="text-lg font-bold">Start talking</h2>
@@ -96,7 +96,7 @@ export default function LandingPage() {
               <input
                 value={username}
                 onChange={(event) => setUsername(event.target.value)}
-                className="w-full rounded-md border border-line bg-ink/60 px-4 py-3 text-slate-100 outline-none ring-mint/30 focus:ring-4"
+                className="w-full rounded-md border border-line bg-ink/60 px-4 py-3 text-base text-slate-100 outline-none ring-mint/30 focus:ring-4 sm:text-sm"
                 maxLength={24}
               />
             </label>
@@ -108,7 +108,7 @@ export default function LandingPage() {
                   value={roomName}
                   onChange={(event) => setRoomName(event.target.value)}
                   placeholder="Evening standup"
-                  className="w-full rounded-md border border-line bg-ink/60 px-4 py-3 text-slate-100 outline-none ring-mint/30 placeholder:text-slate-500 focus:ring-4"
+                  className="w-full rounded-md border border-line bg-ink/60 px-4 py-3 text-base text-slate-100 outline-none ring-mint/30 placeholder:text-slate-500 focus:ring-4 sm:text-sm"
                   maxLength={64}
                 />
               </label>
@@ -132,7 +132,7 @@ export default function LandingPage() {
                 value={joinCode}
                 onChange={(event) => setJoinCode(event.target.value)}
                 placeholder="Room code"
-                className="w-full rounded-md border border-line bg-ink/60 px-4 py-3 uppercase text-slate-100 outline-none ring-skyglass/30 placeholder:normal-case placeholder:text-slate-500 focus:ring-4"
+                className="w-full rounded-md border border-line bg-ink/60 px-4 py-3 text-base uppercase text-slate-100 outline-none ring-skyglass/30 placeholder:normal-case placeholder:text-slate-500 focus:ring-4 sm:text-sm"
                 maxLength={12}
               />
               <button className="inline-flex w-full items-center justify-center gap-2 rounded-md border border-line bg-white/[0.06] px-4 py-3 font-bold text-slate-100 hover:bg-white/10">

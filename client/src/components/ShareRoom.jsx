@@ -14,14 +14,15 @@ export default function ShareRoom({ roomId }) {
   }
 
   return (
-    <div className="relative flex flex-wrap items-center gap-2">
+    <div className="relative flex items-center gap-2">
       <button
         type="button"
         onClick={copyInvite}
-        className="inline-flex items-center gap-2 rounded-md border border-line bg-white/[0.05] px-3 py-2 text-sm text-slate-200 hover:bg-white/10"
+        className="inline-flex h-10 items-center justify-center gap-2 rounded-md border border-line bg-white/[0.05] px-3 text-sm text-slate-200 hover:bg-white/10"
+        title={copied ? "Copied" : "Copy link"}
       >
         {copied ? <Check className="h-4 w-4 text-mint" /> : <Copy className="h-4 w-4" />}
-        {copied ? "Copied" : "Copy Link"}
+        <span className="hidden sm:inline">{copied ? "Copied" : "Copy Link"}</span>
       </button>
       <button
         type="button"

@@ -3,7 +3,7 @@ import { motion } from "framer-motion";
 
 export default function ParticipantList({ participants, selfId, isHost = false, onHostMute, onKick }) {
   return (
-    <aside className="glass flex min-h-0 flex-col rounded-lg p-4">
+    <aside className="glass flex h-full min-h-0 flex-col rounded-lg p-3 sm:p-4">
       <div className="mb-4 flex items-center justify-between">
         <h2 className="text-sm font-semibold text-slate-100">Participants</h2>
         <span className="rounded-full bg-white/[0.08] px-2.5 py-1 text-xs text-slate-300">{participants.length}</span>
@@ -13,7 +13,7 @@ export default function ParticipantList({ participants, selfId, isHost = false, 
           <motion.div
             key={user.id}
             layout
-            className={`flex items-center gap-3 rounded-lg border p-3 ${
+            className={`flex items-center gap-2 rounded-lg border p-3 sm:gap-3 ${
               user.speaking ? "border-mint/45 bg-mint/10 shadow-glow" : "border-line bg-white/[0.03]"
             }`}
           >
@@ -33,7 +33,7 @@ export default function ParticipantList({ participants, selfId, isHost = false, 
                 {user.handRaised ? "Hand raised" : user.screenSharing ? "Sharing screen" : user.speaking ? "Speaking now" : "Online"}
               </p>
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex shrink-0 flex-wrap items-center justify-end gap-1 sm:gap-2">
               {user.handRaised && <Hand className="h-4 w-4 text-amberglow" />}
               {user.screenSharing && <ScreenShare className="h-4 w-4 text-mint" />}
               {user.video && <Video className="h-4 w-4 text-skyglass" />}

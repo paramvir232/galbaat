@@ -154,7 +154,7 @@ export default function ChatPanel({
 
   return (
     <aside className="glass flex h-full min-h-0 flex-col overflow-hidden rounded-lg">
-      <div className="shrink-0 border-b border-line p-4">
+      <div className="shrink-0 border-b border-line p-3 sm:p-4">
         <h2 className="text-sm font-semibold text-slate-100">Room Chat</h2>
         <p className="mt-1 min-h-4 text-xs text-slate-400">
           {typingUsers.length ? `${typingUsers.join(", ")} typing...` : "Messages sync for everyone here"}
@@ -216,7 +216,7 @@ export default function ChatPanel({
         </div>
       </div>
 
-      <div className="scrollbar-thin min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain p-4">
+      <div className="scrollbar-thin min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain p-3 sm:p-4">
         {messages.map((message) => {
           const mentioned = currentUsername && message.message?.toLowerCase().includes(`@${currentUsername.toLowerCase()}`);
           return (
@@ -252,7 +252,7 @@ export default function ChatPanel({
 
       <form onSubmit={submit} onPaste={handlePaste} className="relative shrink-0 border-t border-line p-3">
         {showEmojis && (
-          <div className="absolute bottom-16 left-3 grid grid-cols-5 gap-1 rounded-lg border border-line bg-panel p-2 shadow-2xl">
+          <div className="absolute bottom-16 left-3 z-20 grid grid-cols-5 gap-1 rounded-lg border border-line bg-panel p-2 shadow-2xl">
             {EMOJIS.map((emoji) => (
               <button
                 type="button"
@@ -266,11 +266,11 @@ export default function ChatPanel({
             ))}
           </div>
         )}
-        <div className="flex items-center gap-2 rounded-lg border border-line bg-ink/50 p-2">
+        <div className="flex items-center gap-1 rounded-lg border border-line bg-ink/50 p-2 sm:gap-2">
           <button
             type="button"
             title="Emoji"
-            className="grid h-10 w-10 shrink-0 place-items-center rounded-md text-slate-400 hover:bg-white/[0.08] hover:text-slate-100"
+            className="grid h-10 w-9 shrink-0 place-items-center rounded-md text-slate-400 hover:bg-white/[0.08] hover:text-slate-100 sm:w-10"
             onClick={() => setShowEmojis((show) => !show)}
           >
             <Smile className="h-5 w-5" />
@@ -280,14 +280,14 @@ export default function ChatPanel({
             onChange={handleChange}
             maxLength={1000}
             placeholder="Message, @mention, or paste an image"
-            className="min-w-0 flex-1 bg-transparent text-sm text-slate-100 outline-none placeholder:text-slate-500"
+            className="min-w-0 flex-1 bg-transparent text-base text-slate-100 outline-none placeholder:text-slate-500 sm:text-sm"
           />
           <button
             type="button"
             title="Upload file or image"
             disabled={fileUploading}
             onClick={() => fileInputRef.current?.click()}
-            className="grid h-10 w-10 shrink-0 place-items-center rounded-md text-slate-400 hover:bg-white/[0.08] hover:text-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
+            className="grid h-10 w-9 shrink-0 place-items-center rounded-md text-slate-400 hover:bg-white/[0.08] hover:text-slate-100 disabled:cursor-not-allowed disabled:opacity-50 sm:w-10"
           >
             {fileUploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Image className="h-5 w-5" />}
           </button>
@@ -295,7 +295,7 @@ export default function ChatPanel({
             type="button"
             title={recording ? "Stop voice note" : "Record voice note"}
             onClick={toggleRecording}
-            className={`grid h-10 w-10 shrink-0 place-items-center rounded-md ${
+            className={`grid h-10 w-9 shrink-0 place-items-center rounded-md sm:w-10 ${
               recording ? "bg-red-500/20 text-red-200" : "text-slate-400 hover:bg-white/[0.08] hover:text-slate-100"
             }`}
           >
@@ -304,7 +304,7 @@ export default function ChatPanel({
           <button
             type="submit"
             title="Send"
-            className="grid h-10 w-10 shrink-0 place-items-center rounded-md bg-mint text-ink hover:bg-mint/90"
+            className="grid h-10 w-9 shrink-0 place-items-center rounded-md bg-mint text-ink hover:bg-mint/90 sm:w-10"
           >
             <Send className="h-4 w-4" />
           </button>
