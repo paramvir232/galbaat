@@ -8,10 +8,15 @@ import PushToTalk from "../components/PushToTalk.jsx";
 import ShareRoom from "../components/ShareRoom.jsx";
 import StatusPill from "../components/StatusPill.jsx";
 import VideoGrid from "../components/VideoGrid.jsx";
-import { getFiles, getMessages, getRoom, uploadRoomFile } from "../lib/api.js";
+import { getMessages, getRoom, uploadRoomFile } from "../lib/api.js";
 import { getGuestName } from "../lib/guest.js";
 import { useSocket } from "../hooks/useSocket.js";
 import { useWebRtcRoom } from "../hooks/useWebRtcRoom.js";
+
+const MIN_CHAT_WIDTH = 320;
+const MAX_CHAT_WIDTH = 520;
+const ROOM_MIN_WIDTH = 360;
+const ROOM_MIN_WIDTH_WITHOUT_PARTICIPANTS = 420;
 
 export default function RoomPage() {
   const { roomId: routeRoomId } = useParams();
@@ -38,7 +43,6 @@ export default function RoomPage() {
   const [self, setSelf] = useState(null);
   const [participants, setParticipants] = useState([]);
   const [messages, setMessages] = useState([]);
-  const [files, setFiles] = useState([]);
   const [typing, setTyping] = useState({});
   const [status, setStatus] = useState("connecting");
   const [connected, setConnected] = useState(socket.connected);
@@ -63,6 +67,12 @@ export default function RoomPage() {
   const participantHandsRef = useRef(new Map());
   const chatResizeRef = useRef(null);
 
+  const getMaxChatWidth = useCallback(() => {
+    if (typeof window === "undefined") return MAX_CHAT_WIDTH;
+    const reservedWidth = participantsCollapsed ? 500 : 820;
+    return Math.max(MIN_CHAT_WIDTH, Math.min(MAX_CHAT_WIDTH, window.innerWidth - reservedWidth));
+  }, [participantsCollapsed]);
+
   useEffect(() => {
     videoEnabledRef.current = videoEnabled;
   }, [videoEnabled]);
@@ -74,6 +84,18 @@ export default function RoomPage() {
     media.addEventListener("change", updateLayout);
     return () => media.removeEventListener("change", updateLayout);
   }, []);
+
+  useEffect(() => {
+    if (!desktopLayout) return undefined;
+
+    const clampChatWidth = () => {
+      setChatWidth((current) => Math.max(MIN_CHAT_WIDTH, Math.min(getMaxChatWidth(), current)));
+    };
+
+    clampChatWidth();
+    window.addEventListener("resize", clampChatWidth);
+    return () => window.removeEventListener("resize", clampChatWidth);
+  }, [desktopLayout, getMaxChatWidth]);
 
   useEffect(() => {
     if (wasScreenSharingRef.current && !screenSharing && connected) {
@@ -145,18 +167,15 @@ export default function RoomPage() {
     setSelf(null);
     setParticipants([]);
     setTyping({});
-    setFiles([]);
 
     async function loadRoom() {
       try {
-        const [{ room: loadedRoom }, { messages: history }, { files: roomFiles }] = await Promise.all([
+        const [{ room: loadedRoom }, { messages: history }] = await Promise.all([
           getRoom(roomId),
-          getMessages(roomId),
-          getFiles(roomId)
+          getMessages(roomId)
         ]);
         setRoom(loadedRoom);
         setMessages(history);
-        setFiles(roomFiles);
       } catch (err) {
         setError(err.message);
         window.setTimeout(() => navigate("/"), 1400);
@@ -246,9 +265,6 @@ export default function RoomPage() {
     function onReaction({ messageId, reactions }) {
       setMessages((current) => current.map((message) => (message.id === messageId ? { ...message, reactions } : message)));
     }
-    function onFileUploaded(file) {
-      setFiles((current) => (current.some((item) => item.id === file.id) ? current : [...current, file]));
-    }
     function onTypingStart(user) {
       if (user.id === self?.id) return;
       setTyping((current) => ({ ...current, [user.id]: user.username }));
@@ -283,7 +299,6 @@ export default function RoomPage() {
     socket.on("participant:left", onLeft);
     socket.on("chat:message", onChat);
     socket.on("chat:reaction", onReaction);
-    socket.on("file:uploaded", onFileUploaded);
     socket.on("typing:start", onTypingStart);
     socket.on("typing:stop", onTypingStop);
     socket.on("room:lock", onLock);
@@ -300,7 +315,6 @@ export default function RoomPage() {
       socket.off("participant:left", onLeft);
       socket.off("chat:message", onChat);
       socket.off("chat:reaction", onReaction);
-      socket.off("file:uploaded", onFileUploaded);
       socket.off("typing:start", onTypingStart);
       socket.off("typing:stop", onTypingStop);
       socket.off("room:lock", onLock);
@@ -398,10 +412,7 @@ export default function RoomPage() {
     setFileUploading(true);
     setError("");
     try {
-      const { file: uploaded } = await uploadRoomFile(roomId, file, getGuestName(), options);
-      if (!options.chatOnly) {
-        setFiles((current) => (current.some((item) => item.id === uploaded.id) ? current : [...current, uploaded]));
-      }
+      await uploadRoomFile(roomId, file, getGuestName(), { ...options, chatOnly: true });
     } catch (err) {
       setError(err.message || "Upload failed");
     } finally {
@@ -427,7 +438,7 @@ export default function RoomPage() {
   function resizeChat(event) {
     if (!chatResizeRef.current) return;
     const nextWidth = chatResizeRef.current.startWidth + chatResizeRef.current.startX - event.clientX;
-    setChatWidth(Math.max(280, Math.min(520, nextWidth)));
+    setChatWidth(Math.max(MIN_CHAT_WIDTH, Math.min(getMaxChatWidth(), nextWidth)));
   }
 
   function stopChatResize() {
@@ -480,8 +491,8 @@ export default function RoomPage() {
   const hasVideo = videoEnabled || remoteStreams.some(({ stream }) => stream.getVideoTracks().some((track) => track.readyState === "live"));
   const isHost = Boolean(self?.host);
   const desktopGridColumns = participantsCollapsed
-    ? `minmax(0,1fr) ${chatWidth}px`
-    : `280px minmax(0,1fr) ${chatWidth}px`;
+    ? `minmax(${ROOM_MIN_WIDTH_WITHOUT_PARTICIPANTS}px,1fr) minmax(${MIN_CHAT_WIDTH}px,${chatWidth}px)`
+    : `280px minmax(${ROOM_MIN_WIDTH}px,1fr) minmax(${MIN_CHAT_WIDTH}px,${chatWidth}px)`;
 
   return (
     <main className="flex h-dvh min-h-0 flex-col overflow-hidden p-2 text-slate-100 sm:p-4">
@@ -557,7 +568,6 @@ export default function RoomPage() {
         </div>
 
         <motion.div
-          layout
           className={`${mobilePanel === "room" ? "flex" : "hidden"} glass min-h-0 flex-col items-center gap-4 overflow-y-auto rounded-lg p-3 sm:gap-5 sm:p-5 lg:flex xl:p-6`}
         >
           <div className="flex w-full flex-wrap items-center justify-center gap-2 sm:gap-3">
@@ -640,7 +650,6 @@ export default function RoomPage() {
           />
           <ChatPanel
             messages={messages}
-            files={files}
             typingUsers={typingUsers}
             fileUploading={fileUploading}
             currentUsername={self?.username || getGuestName()}

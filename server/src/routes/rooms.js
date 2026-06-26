@@ -1,7 +1,7 @@
 import express from "express";
 import { Message } from "../models/Message.js";
 import { createRoom, findRoom, touchRoom } from "../services/roomService.js";
-import { getRoomFile, listRoomFiles, publicFile, registerUploadedFile, removeUploadedFile, upload } from "../services/fileService.js";
+import { getRoomFile, registerUploadedFile, removeUploadedFile, upload } from "../services/fileService.js";
 import { cleanRoomName } from "../utils/sanitize.js";
 
 export const roomsRouter = express.Router();
@@ -57,44 +57,30 @@ roomsRouter.get("/:roomId/messages", async (req, res, next) => {
   }
 });
 
-roomsRouter.get("/:roomId/files", ensureRoom, async (req, res, next) => {
-  try {
-    const files = await listRoomFiles(req.roomId);
-    res.json({ files: files.map(publicFile) });
-  } catch (error) {
-    next(error);
-  }
-});
-
 roomsRouter.post("/:roomId/files", ensureRoom, upload.single("file"), async (req, res, next) => {
   let file;
   try {
     if (!req.file) return res.status(400).json({ message: "No file uploaded" });
-    const chatOnly = req.body.chatOnly === "true";
-    file = await registerUploadedFile(req.roomId, req.file, req.body.username, { chatOnly });
+    file = await registerUploadedFile(req.roomId, req.file, req.body.username, { chatOnly: true });
     await touchRoom(req.roomId, req.room.activeUsers);
 
-    if (chatOnly) {
-      const message = await Message.create({
-        roomId: req.roomId,
-        username: file.username,
-        message: file.mimeType?.startsWith("audio/") ? "shared a voice note" : file.mimeType?.startsWith("image/") ? "shared an image" : `shared ${file.originalName}`,
-        attachments: [file],
-        timestamp: new Date()
-      });
-      const payload = {
-        id: message._id.toString(),
-        roomId: req.roomId,
-        username: message.username,
-        message: message.message,
-        attachments: message.attachments,
-        reactions: {},
-        timestamp: message.timestamp
-      };
-      req.app.get("io")?.to(req.roomId).emit("chat:message", payload);
-    } else {
-      req.app.get("io")?.to(req.roomId).emit("file:uploaded", file);
-    }
+    const message = await Message.create({
+      roomId: req.roomId,
+      username: file.username,
+      message: file.mimeType?.startsWith("audio/") ? "shared a voice note" : file.mimeType?.startsWith("image/") ? "shared an image" : `shared ${file.originalName}`,
+      attachments: [file],
+      timestamp: new Date()
+    });
+    const payload = {
+      id: message._id.toString(),
+      roomId: req.roomId,
+      username: message.username,
+      message: message.message,
+      attachments: message.attachments,
+      reactions: {},
+      timestamp: message.timestamp
+    };
+    req.app.get("io")?.to(req.roomId).emit("chat:message", payload);
 
     res.status(201).json({ file });
   } catch (error) {

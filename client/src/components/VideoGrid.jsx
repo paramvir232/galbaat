@@ -10,18 +10,30 @@ function VideoTile({ stream, label, muted = false, mirrored = false, screen = fa
     ref.current.play().catch(() => {});
   }, [stream]);
 
+  function handleKeyDown(event) {
+    if (!onExpand || (event.key !== "Enter" && event.key !== " ")) return;
+    event.preventDefault();
+    onExpand();
+  }
+
   return (
-    <div className={`relative min-h-0 overflow-hidden rounded-lg border border-line bg-ink/70 ${screen ? "col-span-full" : ""}`}>
+    <div
+      role={onExpand ? "button" : undefined}
+      tabIndex={onExpand ? 0 : undefined}
+      onClick={onExpand}
+      onKeyDown={handleKeyDown}
+      className={`group relative aspect-video w-full overflow-hidden rounded-lg border border-line bg-ink/70 text-left outline-none ${onExpand ? "cursor-zoom-in hover:border-mint/50 focus-visible:border-mint/70" : ""}`}
+    >
       {stream ? (
         <video
           ref={ref}
           autoPlay
           playsInline
           muted={muted}
-          className={`aspect-video h-full w-full ${screen ? "object-contain" : "object-cover"} ${mirrored ? "-scale-x-100" : ""}`}
+          className={`h-full w-full ${screen ? "object-contain" : "object-cover"} ${mirrored ? "-scale-x-100" : ""}`}
         />
       ) : (
-        <div className="grid aspect-video h-full w-full place-items-center text-slate-500">
+        <div className="grid h-full w-full place-items-center text-slate-500">
           <Video className="h-7 w-7" />
         </div>
       )}
@@ -31,7 +43,10 @@ function VideoTile({ stream, label, muted = false, mirrored = false, screen = fa
       {onExpand && (
         <button
           type="button"
-          onClick={onExpand}
+          onClick={(event) => {
+            event.stopPropagation();
+            onExpand();
+          }}
           title="Expand video"
           className="absolute right-2 top-2 grid h-9 w-9 place-items-center rounded-md bg-ink/80 text-slate-200 opacity-0 transition hover:bg-white/15 group-hover:opacity-100"
         >
@@ -64,16 +79,15 @@ export default function VideoGrid({ localStream, remoteStreams, participants, se
     ? [{ id: "local", label: localScreen ? `${selfName} screen (you)` : `${selfName} (you)`, stream: localStream, local: true, screen: localScreen }, ...tiles]
     : tiles;
   const sortedTiles = [...allTiles].sort((a, b) => Number(b.screen) - Number(a.screen));
-  const hasScreenShare = sortedTiles.some((tile) => tile.screen);
   const expandedTile = sortedTiles.find((tile) => tile.id === expandedId && !tile.local);
 
   if (!sortedTiles.length) return null;
 
   return (
     <>
-      <div className={`grid w-full gap-3 overflow-hidden ${hasScreenShare ? "max-w-6xl grid-cols-1 xl:grid-cols-2" : "max-w-5xl grid-cols-1 sm:grid-cols-2 xl:grid-cols-3"}`}>
+      <div className="grid w-full max-w-5xl grid-cols-1 items-start gap-3 overflow-hidden sm:grid-cols-2 xl:grid-cols-3">
         {sortedTiles.map((tile) => (
-          <div key={tile.id} className={`group min-h-0 ${tile.screen ? "col-span-full" : ""}`}>
+          <div key={tile.id} className="min-w-0">
             <VideoTile
               stream={tile.stream}
               label={tile.label}

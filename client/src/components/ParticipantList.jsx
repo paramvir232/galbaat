@@ -1,5 +1,4 @@
 import { Crown, Hand, Mic, MicOff, PanelLeftClose, Radio, ScreenShare, ShieldX, Signal, UserX, Video, Volume2 } from "lucide-react";
-import { motion } from "framer-motion";
 import { useState } from "react";
 
 export default function ParticipantList({ participants, selfId, isHost = false, peerVolumes = {}, onPeerVolumeChange, onCollapse, onHostMute, onKick }) {
@@ -27,10 +26,9 @@ export default function ParticipantList({ participants, selfId, isHost = false, 
           const canAdjustVolume = user.id !== selfId;
 
           return (
-          <motion.div
+          <div
             key={user.id}
-            layout
-            className={`grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2 rounded-lg border p-3 sm:gap-3 ${
+            className={`grid min-h-[4.5rem] grid-cols-[auto_minmax(0,1fr)_auto] items-start gap-2 rounded-lg border p-3 sm:gap-3 ${
               user.speaking ? "border-mint/45 bg-mint/10 shadow-glow" : "border-line bg-white/[0.03]"
             }`}
           >
@@ -40,7 +38,7 @@ export default function ParticipantList({ participants, selfId, isHost = false, 
                 {user.speaking ? <Radio className="h-3.5 w-3.5 text-mint" /> : <Signal className="h-3.5 w-3.5 text-skyglass" />}
               </span>
             </div>
-            <div className="min-w-0 flex-1">
+            <div className="min-w-0 overflow-hidden">
               <div className="flex items-center gap-2">
                 <p className="truncate text-sm font-medium text-slate-100">{user.username}</p>
                 {user.id === selfId && <span className="rounded bg-white/10 px-1.5 py-0.5 text-[10px] text-slate-300">you</span>}
@@ -50,7 +48,7 @@ export default function ParticipantList({ participants, selfId, isHost = false, 
                 {user.handRaised ? "Hand raised" : user.screenSharing ? "Sharing screen" : user.speaking ? "Speaking now" : "Online"}
               </p>
             </div>
-            <div className="flex shrink-0 flex-wrap items-center justify-end gap-1 sm:gap-2">
+            <div className="flex h-8 shrink-0 items-center justify-end gap-1 sm:gap-2">
               {user.handRaised && <Hand className="h-4 w-4 text-amberglow" />}
               {user.screenSharing && <ScreenShare className="h-4 w-4 text-mint" />}
               {user.video && <Video className="h-4 w-4 text-skyglass" />}
@@ -91,7 +89,7 @@ export default function ParticipantList({ participants, selfId, isHost = false, 
               )}
             </div>
             {canAdjustVolume && openVolumeId === user.id && (
-              <div className="col-span-3 mt-1 flex items-center gap-2 rounded-md border border-line bg-ink/50 px-2.5 py-2">
+              <div className="col-span-2 col-start-2 mt-2 flex min-w-0 items-center gap-2 rounded-md border border-line bg-ink/50 px-2.5 py-2">
                 <Volume2 className="h-3.5 w-3.5 shrink-0 text-slate-500" />
                 <input
                   type="range"
@@ -105,7 +103,7 @@ export default function ParticipantList({ participants, selfId, isHost = false, 
                 <span className="w-8 shrink-0 text-right text-[11px] text-slate-400">{volume}%</span>
               </div>
             )}
-          </motion.div>
+          </div>
           );
         })}
       </div>

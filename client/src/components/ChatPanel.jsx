@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import DOMPurify from "dompurify";
-import { Download, Eye, File as FileIcon, GripHorizontal, Image, Loader2, Mic, Send, Smile, Square, Upload, X } from "lucide-react";
+import { Download, File as FileIcon, Loader2, Mic, Plus, Send, Smile, Square, X } from "lucide-react";
 import { apiAssetUrl } from "../lib/api";
 import { formatTime } from "../lib/time";
 
@@ -37,7 +37,6 @@ function canReactToMessage(message) {
 
 export default function ChatPanel({
   messages,
-  files,
   typingUsers,
   fileUploading,
   currentUsername,
@@ -51,14 +50,12 @@ export default function ChatPanel({
   const [showEmojis, setShowEmojis] = useState(false);
   const [reactionPickerId, setReactionPickerId] = useState(null);
   const [recording, setRecording] = useState(false);
-  const [filesHeight, setFilesHeight] = useState(150);
   const [imagePreview, setImagePreview] = useState(null);
   const endRef = useRef(null);
   const fileInputRef = useRef(null);
   const typingTimer = useRef(null);
   const recorderRef = useRef(null);
   const chunksRef = useRef([]);
-  const resizeRef = useRef(null);
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
@@ -83,7 +80,7 @@ export default function ChatPanel({
 
   function handleFileChange(event) {
     const [file] = event.target.files || [];
-    if (file) onUploadFile(file);
+    if (file) onUploadFile(file, { chatOnly: true });
     event.target.value = "";
   }
 
@@ -171,34 +168,13 @@ export default function ChatPanel({
     );
   }
 
-  function startResize(event) {
-    event.preventDefault();
-    resizeRef.current = {
-      startY: event.clientY,
-      startHeight: filesHeight
-    };
-    window.addEventListener("pointermove", resizeFiles);
-    window.addEventListener("pointerup", stopResize, { once: true });
-  }
-
-  function resizeFiles(event) {
-    if (!resizeRef.current) return;
-    const nextHeight = resizeRef.current.startHeight + event.clientY - resizeRef.current.startY;
-    setFilesHeight(Math.max(72, Math.min(360, nextHeight)));
-  }
-
-  function stopResize() {
-    resizeRef.current = null;
-    window.removeEventListener("pointermove", resizeFiles);
-  }
-
   function reactToMessage(messageId, emoji) {
     setReactionPickerId(null);
     onReact?.(messageId, emoji);
   }
 
   return (
-    <aside className="glass flex h-full min-h-0 flex-col overflow-hidden rounded-lg">
+    <aside className="glass flex h-full min-h-0 min-w-0 flex-col overflow-hidden rounded-lg">
       <div className="shrink-0 border-b border-line p-3 sm:p-4">
         <h2 className="text-sm font-semibold text-slate-100">Room Chat</h2>
         <p className="mt-1 min-h-4 text-xs text-slate-400">
@@ -206,69 +182,7 @@ export default function ChatPanel({
         </p>
       </div>
 
-      <div className="shrink-0 border-b border-line p-3" style={{ height: filesHeight }}>
-        <div className="mb-2 flex items-center justify-between gap-2">
-          <span className="text-xs font-semibold uppercase text-slate-400">Shared Files</span>
-          <button
-            type="button"
-            onClick={() => fileInputRef.current?.click()}
-            disabled={fileUploading}
-            className="inline-flex items-center gap-2 rounded-md border border-line bg-white/[0.05] px-3 py-2 text-xs font-medium text-slate-200 hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-60"
-          >
-            {fileUploading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Upload className="h-3.5 w-3.5" />}
-            Upload
-          </button>
-          <input ref={fileInputRef} type="file" className="hidden" onChange={handleFileChange} />
-        </div>
-
-        <div className="scrollbar-thin h-[calc(100%-2.75rem)] space-y-2 overflow-y-auto pr-1">
-          {files.length === 0 ? (
-            <p className="rounded-md border border-dashed border-line px-3 py-2 text-xs text-slate-500">No files shared yet</p>
-          ) : (
-            files.map((file) => (
-              <div key={file.id} className="flex items-center gap-2 rounded-md border border-line bg-white/[0.04] p-2 text-slate-200">
-                {file.mimeType?.startsWith("image/") ? (
-                  <img src={apiAssetUrl(file.previewUrl)} alt="" className="h-10 w-10 shrink-0 rounded-md object-cover" />
-                ) : (
-                  <FileIcon className="h-4 w-4 shrink-0 text-skyglass" />
-                )}
-                <span className="min-w-0 flex-1">
-                  <span className="block truncate text-xs font-medium">{file.originalName}</span>
-                  <span className="block text-[11px] text-slate-500">
-                    {formatBytes(file.size)} by {file.username}
-                  </span>
-                </span>
-                <a
-                  href={apiAssetUrl(file.previewUrl)}
-                  target="_blank"
-                  rel="noreferrer"
-                  title="Open file"
-                  className="grid h-8 w-8 shrink-0 place-items-center rounded-md text-slate-400 hover:bg-white/10 hover:text-slate-100"
-                >
-                  <Eye className="h-4 w-4" />
-                </a>
-                <a
-                  href={apiAssetUrl(file.downloadUrl)}
-                  download
-                  title="Download file"
-                  className="grid h-8 w-8 shrink-0 place-items-center rounded-md text-slate-400 hover:bg-white/10 hover:text-slate-100"
-                >
-                  <Download className="h-4 w-4" />
-                </a>
-              </div>
-            ))
-          )}
-        </div>
-      </div>
-
-      <button
-        type="button"
-        onPointerDown={startResize}
-        title="Resize shared files"
-        className="grid h-4 shrink-0 cursor-row-resize place-items-center border-b border-line bg-white/[0.03] text-slate-500 hover:bg-white/[0.07] hover:text-slate-300"
-      >
-        <GripHorizontal className="h-3.5 w-3.5" />
-      </button>
+      <input ref={fileInputRef} type="file" className="hidden" onChange={handleFileChange} />
 
       <div className="scrollbar-thin min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain p-3 sm:p-4">
         {messages.map((message) => {
@@ -344,7 +258,7 @@ export default function ChatPanel({
             ))}
           </div>
         )}
-        <div className="flex items-center gap-1 rounded-lg border border-line bg-ink/50 p-2 sm:gap-2">
+        <div className="flex min-w-0 items-center gap-1 rounded-lg border border-line bg-ink/50 p-2 sm:gap-2">
           <button
             type="button"
             title="Emoji"
@@ -358,16 +272,16 @@ export default function ChatPanel({
             onChange={handleChange}
             maxLength={1000}
             placeholder="Message, @mention, or paste an image"
-            className="min-w-0 flex-1 bg-transparent text-base text-slate-100 outline-none placeholder:text-slate-500 sm:text-sm"
+            className="min-w-0 flex-1 basis-0 bg-transparent text-base text-slate-100 outline-none placeholder:text-slate-500 sm:text-sm"
           />
           <button
             type="button"
-            title="Upload file or image"
+            title="Attach file"
             disabled={fileUploading}
             onClick={() => fileInputRef.current?.click()}
             className="grid h-10 w-9 shrink-0 place-items-center rounded-md text-slate-400 hover:bg-white/[0.08] hover:text-slate-100 disabled:cursor-not-allowed disabled:opacity-50 sm:w-10"
           >
-            {fileUploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Image className="h-5 w-5" />}
+            {fileUploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-5 w-5" />}
           </button>
           <button
             type="button"
