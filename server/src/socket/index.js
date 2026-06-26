@@ -189,10 +189,19 @@ export function registerSocketHandlers(io) {
 
       const message = await Message.findOne({ _id: messageId, roomId: normalizedRoomId });
       if (!message) return;
-      const current = new Set(message.reactions?.get(cleanEmoji) || []);
-      if (current.has(socket.data.username)) current.delete(socket.data.username);
-      else current.add(socket.data.username);
-      message.reactions.set(cleanEmoji, [...current]);
+      const username = socket.data.username;
+      const currentForEmoji = new Set(message.reactions?.get(cleanEmoji) || []);
+      const isRemovingCurrentReaction = currentForEmoji.has(username);
+
+      for (const [reactionEmoji, users] of message.reactions.entries()) {
+        const nextUsers = users.filter((user) => user !== username);
+        if (nextUsers.length) message.reactions.set(reactionEmoji, nextUsers);
+        else message.reactions.delete(reactionEmoji);
+      }
+
+      if (!isRemovingCurrentReaction) {
+        message.reactions.set(cleanEmoji, [...(message.reactions.get(cleanEmoji) || []), username]);
+      }
       await message.save();
 
       io.to(normalizedRoomId).emit("chat:reaction", {

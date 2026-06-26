@@ -1,7 +1,10 @@
 import { Crown, Hand, Mic, MicOff, PanelLeftClose, Radio, ScreenShare, ShieldX, Signal, UserX, Video, Volume2 } from "lucide-react";
 import { motion } from "framer-motion";
+import { useState } from "react";
 
 export default function ParticipantList({ participants, selfId, isHost = false, peerVolumes = {}, onPeerVolumeChange, onCollapse, onHostMute, onKick }) {
+  const [openVolumeId, setOpenVolumeId] = useState(null);
+
   return (
     <aside className="glass flex h-full min-h-0 flex-col rounded-lg p-3 sm:p-4">
       <div className="mb-4 flex items-center justify-between gap-2">
@@ -27,7 +30,7 @@ export default function ParticipantList({ participants, selfId, isHost = false, 
           <motion.div
             key={user.id}
             layout
-            className={`flex items-center gap-2 rounded-lg border p-3 sm:gap-3 ${
+            className={`grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2 rounded-lg border p-3 sm:gap-3 ${
               user.speaking ? "border-mint/45 bg-mint/10 shadow-glow" : "border-line bg-white/[0.03]"
             }`}
           >
@@ -46,21 +49,6 @@ export default function ParticipantList({ participants, selfId, isHost = false, 
               <p className="text-xs text-slate-400">
                 {user.handRaised ? "Hand raised" : user.screenSharing ? "Sharing screen" : user.speaking ? "Speaking now" : "Online"}
               </p>
-              {canAdjustVolume && (
-                <div className="mt-2 flex items-center gap-2">
-                  <Volume2 className="h-3.5 w-3.5 shrink-0 text-slate-500" />
-                  <input
-                    type="range"
-                    min="0"
-                    max="100"
-                    value={volume}
-                    onChange={(event) => onPeerVolumeChange?.(user.id, event.target.value)}
-                    aria-label={`${user.username} volume`}
-                    className="h-1.5 min-w-0 flex-1 accent-mint"
-                  />
-                  <span className="w-8 shrink-0 text-right text-[11px] text-slate-500">{volume}%</span>
-                </div>
-              )}
             </div>
             <div className="flex shrink-0 flex-wrap items-center justify-end gap-1 sm:gap-2">
               {user.handRaised && <Hand className="h-4 w-4 text-amberglow" />}
@@ -68,7 +56,16 @@ export default function ParticipantList({ participants, selfId, isHost = false, 
               {user.video && <Video className="h-4 w-4 text-skyglass" />}
               {user.muted ? <MicOff className="h-4 w-4 text-slate-500" /> : <Mic className="h-4 w-4 text-slate-400" />}
               {canAdjustVolume && (
-                <Volume2 className="h-4 w-4 text-slate-400" />
+                <button
+                  type="button"
+                  title="Adjust volume"
+                  onClick={() => setOpenVolumeId((id) => (id === user.id ? null : user.id))}
+                  className={`grid h-7 w-7 place-items-center rounded-md hover:bg-white/10 ${
+                    openVolumeId === user.id ? "text-mint" : "text-slate-400 hover:text-slate-100"
+                  }`}
+                >
+                  <Volume2 className="h-4 w-4" />
+                </button>
               )}
               {isHost && user.id !== selfId && (
                 <>
@@ -93,6 +90,21 @@ export default function ParticipantList({ participants, selfId, isHost = false, 
                 </>
               )}
             </div>
+            {canAdjustVolume && openVolumeId === user.id && (
+              <div className="col-span-3 mt-1 flex items-center gap-2 rounded-md border border-line bg-ink/50 px-2.5 py-2">
+                <Volume2 className="h-3.5 w-3.5 shrink-0 text-slate-500" />
+                <input
+                  type="range"
+                  min="0"
+                  max="100"
+                  value={volume}
+                  onChange={(event) => onPeerVolumeChange?.(user.id, event.target.value)}
+                  aria-label={`${user.username} volume`}
+                  className="h-1.5 min-w-0 flex-1 accent-mint"
+                />
+                <span className="w-8 shrink-0 text-right text-[11px] text-slate-400">{volume}%</span>
+              </div>
+            )}
           </motion.div>
           );
         })}

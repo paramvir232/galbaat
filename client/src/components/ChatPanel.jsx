@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import DOMPurify from "dompurify";
-import { Download, Eye, File as FileIcon, GripHorizontal, Image, Loader2, Mic, Send, Smile, Square, Upload } from "lucide-react";
+import { Download, Eye, File as FileIcon, GripHorizontal, Image, Loader2, Mic, Send, Smile, Square, Upload, X } from "lucide-react";
 import { apiAssetUrl } from "../lib/api";
 import { formatTime } from "../lib/time";
 
@@ -52,6 +52,7 @@ export default function ChatPanel({
   const [reactionPickerId, setReactionPickerId] = useState(null);
   const [recording, setRecording] = useState(false);
   const [filesHeight, setFilesHeight] = useState(150);
+  const [imagePreview, setImagePreview] = useState(null);
   const endRef = useRef(null);
   const fileInputRef = useRef(null);
   const typingTimer = useRef(null);
@@ -137,10 +138,15 @@ export default function ChatPanel({
   function renderAttachment(file) {
     const kind = attachmentKind(file);
     if (kind === "image") {
+      const previewUrl = apiAssetUrl(file.previewUrl);
       return (
-        <a href={apiAssetUrl(file.previewUrl)} target="_blank" rel="noreferrer" className="mt-3 block overflow-hidden rounded-md border border-line bg-ink/50">
-          <img src={apiAssetUrl(file.previewUrl)} alt={file.originalName} className="max-h-72 w-full object-contain" />
-        </a>
+        <button
+          type="button"
+          onClick={() => setImagePreview({ url: previewUrl, name: file.originalName })}
+          className="mt-3 block w-full overflow-hidden rounded-md border border-line bg-ink/50 text-left hover:border-mint/50"
+        >
+          <img src={previewUrl} alt={file.originalName} className="max-h-72 w-full object-contain" />
+        </button>
       );
     }
 
@@ -382,6 +388,25 @@ export default function ChatPanel({
           </button>
         </div>
       </form>
+
+      {imagePreview && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-ink/95 p-3 backdrop-blur sm:p-6">
+          <div className="relative flex h-full w-full max-w-5xl items-center justify-center overflow-hidden rounded-lg border border-line bg-black/50 p-3">
+            <img src={imagePreview.url} alt={imagePreview.name} className="max-h-full max-w-full object-contain" />
+            <div className="absolute left-4 top-4 max-w-[calc(100%-5rem)] truncate rounded bg-ink/85 px-3 py-2 text-sm font-medium text-slate-100">
+              {imagePreview.name}
+            </div>
+            <button
+              type="button"
+              onClick={() => setImagePreview(null)}
+              title="Close image preview"
+              className="absolute right-4 top-4 grid h-10 w-10 place-items-center rounded-md border border-line bg-ink/85 text-slate-100 hover:bg-white/10"
+            >
+              <X className="h-5 w-5" />
+            </button>
+          </div>
+        </div>
+      )}
     </aside>
   );
 }

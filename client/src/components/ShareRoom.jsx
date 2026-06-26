@@ -1,4 +1,5 @@
 import { useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { QRCodeSVG } from "qrcode.react";
 import { Check, Copy, Link2, QrCode } from "lucide-react";
 
@@ -8,6 +9,17 @@ export default function ShareRoom({ roomId }) {
   const [qrPosition, setQrPosition] = useState({ right: 12, top: 60 });
   const qrButtonRef = useRef(null);
   const inviteUrl = useMemo(() => `${window.location.origin}/r/${roomId}`, [roomId]);
+  const qrPopover = showQr
+    ? createPortal(
+        <div
+          className="fixed z-[9999] rounded-lg border border-line bg-slate-950 p-3 shadow-2xl"
+          style={qrPosition}
+        >
+          <QRCodeSVG value={inviteUrl} size={152} bgColor="#020617" fgColor="#e5edf7" />
+        </div>,
+        document.body
+      )
+    : null;
 
   async function copyInvite() {
     await navigator.clipboard.writeText(inviteUrl);
@@ -46,14 +58,7 @@ export default function ShareRoom({ roomId }) {
       >
         {showQr ? <Link2 className="h-4 w-4" /> : <QrCode className="h-4 w-4" />}
       </button>
-      {showQr && (
-        <div
-          className="fixed z-[100] rounded-lg border border-line bg-slate-950 p-3 shadow-2xl"
-          style={qrPosition}
-        >
-          <QRCodeSVG value={inviteUrl} size={152} bgColor="#020617" fgColor="#e5edf7" />
-        </div>
-      )}
+      {qrPopover}
     </div>
   );
 }
