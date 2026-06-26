@@ -1,7 +1,7 @@
-import { useEffect, useMemo, useRef } from "react";
-import { Video } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { Maximize2, Video, X } from "lucide-react";
 
-function VideoTile({ stream, label, muted = false, mirrored = false, screen = false }) {
+function VideoTile({ stream, label, muted = false, mirrored = false, screen = false, onExpand }) {
   const ref = useRef(null);
 
   useEffect(() => {
@@ -28,11 +28,22 @@ function VideoTile({ stream, label, muted = false, mirrored = false, screen = fa
       <div className="absolute bottom-2 left-2 max-w-[calc(100%-1rem)] truncate rounded bg-ink/80 px-2 py-1 text-xs font-medium text-slate-100">
         {label}
       </div>
+      {onExpand && (
+        <button
+          type="button"
+          onClick={onExpand}
+          title="Expand video"
+          className="absolute right-2 top-2 grid h-9 w-9 place-items-center rounded-md bg-ink/80 text-slate-200 opacity-0 transition hover:bg-white/15 group-hover:opacity-100"
+        >
+          <Maximize2 className="h-4 w-4" />
+        </button>
+      )}
     </div>
   );
 }
 
 export default function VideoGrid({ localStream, remoteStreams, participants, selfId, screenSharing = false }) {
+  const [expandedId, setExpandedId] = useState(null);
   const tiles = useMemo(() => {
     const participantById = (id) => participants.find((user) => user.id === id);
     return remoteStreams
@@ -54,14 +65,48 @@ export default function VideoGrid({ localStream, remoteStreams, participants, se
     : tiles;
   const sortedTiles = [...allTiles].sort((a, b) => Number(b.screen) - Number(a.screen));
   const hasScreenShare = sortedTiles.some((tile) => tile.screen);
+  const expandedTile = sortedTiles.find((tile) => tile.id === expandedId && !tile.local);
 
   if (!sortedTiles.length) return null;
 
   return (
-    <div className={`grid w-full gap-3 overflow-hidden ${hasScreenShare ? "max-w-6xl grid-cols-1 xl:grid-cols-2" : "max-w-5xl grid-cols-1 sm:grid-cols-2 xl:grid-cols-3"}`}>
-      {sortedTiles.map((tile) => (
-        <VideoTile key={tile.id} stream={tile.stream} label={tile.label} muted={tile.local} mirrored={tile.local && !tile.screen} screen={tile.screen} />
-      ))}
-    </div>
+    <>
+      <div className={`grid w-full gap-3 overflow-hidden ${hasScreenShare ? "max-w-6xl grid-cols-1 xl:grid-cols-2" : "max-w-5xl grid-cols-1 sm:grid-cols-2 xl:grid-cols-3"}`}>
+        {sortedTiles.map((tile) => (
+          <div key={tile.id} className={`group min-h-0 ${tile.screen ? "col-span-full" : ""}`}>
+            <VideoTile
+              stream={tile.stream}
+              label={tile.label}
+              muted
+              mirrored={tile.local && !tile.screen}
+              screen={tile.screen}
+              onExpand={tile.local ? undefined : () => setExpandedId(tile.id)}
+            />
+          </div>
+        ))}
+      </div>
+
+      {expandedTile && (
+        <div className="fixed inset-0 z-50 bg-ink/95 p-3 backdrop-blur sm:p-5">
+          <div className="relative flex h-full w-full items-center justify-center overflow-hidden rounded-lg border border-line bg-black/60 p-2 sm:p-4">
+            <VideoTile
+              stream={expandedTile.stream}
+              label={expandedTile.label}
+              muted
+              screen
+              onExpand={undefined}
+            />
+            <button
+              type="button"
+              onClick={() => setExpandedId(null)}
+              title="Close expanded video"
+              className="absolute right-4 top-4 grid h-10 w-10 place-items-center rounded-md border border-line bg-ink/85 text-slate-100 hover:bg-white/10"
+            >
+              <X className="h-5 w-5" />
+            </button>
+          </div>
+        </div>
+      )}
+    </>
   );
 }

@@ -30,10 +30,11 @@ export function getFiles(roomId) {
   return request(`/api/rooms/${encodeURIComponent(roomId)}/files`);
 }
 
-export async function uploadRoomFile(roomId, file, username) {
+export async function uploadRoomFile(roomId, file, username, options = {}) {
   const body = new FormData();
   body.append("file", file);
   body.append("username", username);
+  if (options.chatOnly) body.append("chatOnly", "true");
 
   const res = await fetch(`${API_URL}/api/rooms/${encodeURIComponent(roomId)}/files`, {
     method: "POST",

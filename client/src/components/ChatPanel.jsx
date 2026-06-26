@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import DOMPurify from "dompurify";
-import { Download, Eye, File as FileIcon, Image, Loader2, Mic, Send, Smile, Square, Upload } from "lucide-react";
+import { Download, Eye, File as FileIcon, GripHorizontal, Image, Loader2, Mic, Send, Smile, Square, Upload } from "lucide-react";
 import { apiAssetUrl } from "../lib/api";
 import { formatTime } from "../lib/time";
 
@@ -40,11 +40,13 @@ export default function ChatPanel({
   const [value, setValue] = useState("");
   const [showEmojis, setShowEmojis] = useState(false);
   const [recording, setRecording] = useState(false);
+  const [filesHeight, setFilesHeight] = useState(150);
   const endRef = useRef(null);
   const fileInputRef = useRef(null);
   const typingTimer = useRef(null);
   const recorderRef = useRef(null);
   const chunksRef = useRef([]);
+  const resizeRef = useRef(null);
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
@@ -85,7 +87,7 @@ export default function ChatPanel({
       type: file.type,
       lastModified: file.lastModified || Date.now()
     });
-    onUploadFile(namedFile);
+    onUploadFile(namedFile, { chatOnly: true });
     setShowEmojis(false);
   }
 
@@ -112,7 +114,7 @@ export default function ChatPanel({
         const file = new window.File([blob], `voice-note-${new Date().toISOString().replace(/[:.]/g, "-")}.${extension}`, {
           type: blob.type || "audio/webm"
         });
-        onUploadFile(file);
+        onUploadFile(file, { chatOnly: true });
       };
       recorder.start();
       setRecording(true);
@@ -152,6 +154,27 @@ export default function ChatPanel({
     );
   }
 
+  function startResize(event) {
+    event.preventDefault();
+    resizeRef.current = {
+      startY: event.clientY,
+      startHeight: filesHeight
+    };
+    window.addEventListener("pointermove", resizeFiles);
+    window.addEventListener("pointerup", stopResize, { once: true });
+  }
+
+  function resizeFiles(event) {
+    if (!resizeRef.current) return;
+    const nextHeight = resizeRef.current.startHeight + event.clientY - resizeRef.current.startY;
+    setFilesHeight(Math.max(72, Math.min(360, nextHeight)));
+  }
+
+  function stopResize() {
+    resizeRef.current = null;
+    window.removeEventListener("pointermove", resizeFiles);
+  }
+
   return (
     <aside className="glass flex h-full min-h-0 flex-col overflow-hidden rounded-lg">
       <div className="shrink-0 border-b border-line p-3 sm:p-4">
@@ -161,7 +184,7 @@ export default function ChatPanel({
         </p>
       </div>
 
-      <div className="shrink-0 border-b border-line p-3">
+      <div className="shrink-0 border-b border-line p-3" style={{ height: filesHeight }}>
         <div className="mb-2 flex items-center justify-between gap-2">
           <span className="text-xs font-semibold uppercase text-slate-400">Shared Files</span>
           <button
@@ -176,7 +199,7 @@ export default function ChatPanel({
           <input ref={fileInputRef} type="file" className="hidden" onChange={handleFileChange} />
         </div>
 
-        <div className="scrollbar-thin max-h-32 space-y-2 overflow-y-auto pr-1">
+        <div className="scrollbar-thin h-[calc(100%-2.75rem)] space-y-2 overflow-y-auto pr-1">
           {files.length === 0 ? (
             <p className="rounded-md border border-dashed border-line px-3 py-2 text-xs text-slate-500">No files shared yet</p>
           ) : (
@@ -216,13 +239,22 @@ export default function ChatPanel({
         </div>
       </div>
 
+      <button
+        type="button"
+        onPointerDown={startResize}
+        title="Resize shared files"
+        className="grid h-4 shrink-0 cursor-row-resize place-items-center border-b border-line bg-white/[0.03] text-slate-500 hover:bg-white/[0.07] hover:text-slate-300"
+      >
+        <GripHorizontal className="h-3.5 w-3.5" />
+      </button>
+
       <div className="scrollbar-thin min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain p-3 sm:p-4">
         {messages.map((message) => {
           const mentioned = currentUsername && message.message?.toLowerCase().includes(`@${currentUsername.toLowerCase()}`);
           return (
             <div
               key={message.id || `${message.username}-${message.timestamp}`}
-              className={`rounded-lg border p-3 ${mentioned ? "border-amberglow/40 bg-amberglow/10" : "border-transparent bg-white/[0.04]"}`}
+              className={`group relative rounded-lg border p-3 ${mentioned ? "border-amberglow/40 bg-amberglow/10" : "border-transparent bg-white/[0.04]"}`}
             >
               <div className="mb-1 flex items-center justify-between gap-3">
                 <span className="truncate text-sm font-semibold text-slate-100">{message.username}</span>
@@ -233,7 +265,7 @@ export default function ChatPanel({
                 <div key={file.id}>{renderAttachment(file)}</div>
               ))}
               <div className="mt-2 flex flex-wrap items-center gap-1">
-                {REACTIONS.map((emoji) => (
+                {REACTIONS.filter((emoji) => message.reactions?.[emoji]).map((emoji) => (
                   <button
                     key={emoji}
                     type="button"
@@ -241,6 +273,19 @@ export default function ChatPanel({
                     className="rounded-full border border-line bg-white/[0.04] px-2 py-1 text-xs text-slate-300 hover:bg-white/10"
                   >
                     {emoji} {message.reactions?.[emoji] || ""}
+                  </button>
+                ))}
+              </div>
+              <div className="absolute -bottom-4 right-3 hidden rounded-full border border-line bg-panel/95 p-1 shadow-xl group-hover:flex">
+                {REACTIONS.map((emoji) => (
+                  <button
+                    key={emoji}
+                    type="button"
+                    onClick={() => onReact?.(message.id, emoji)}
+                    className="grid h-8 w-8 place-items-center rounded-full text-sm hover:bg-white/10"
+                    title="React"
+                  >
+                    {emoji}
                   </button>
                 ))}
               </div>

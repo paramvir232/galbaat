@@ -65,10 +65,11 @@ export const upload = multer({
 });
 
 export async function listRoomFiles(roomId) {
-  return readMetadata(roomId);
+  const files = await readMetadata(roomId);
+  return files.filter((file) => !file.chatOnly);
 }
 
-export async function registerUploadedFile(roomId, file, username) {
+export async function registerUploadedFile(roomId, file, username, options = {}) {
   const id = path.parse(file.filename).name;
   const metadata = {
     id,
@@ -78,6 +79,7 @@ export async function registerUploadedFile(roomId, file, username) {
     mimeType: cleanText(file.mimetype || "application/octet-stream", 120),
     size: file.size,
     username: cleanUsername(username),
+    chatOnly: Boolean(options.chatOnly),
     uploadedAt: new Date().toISOString()
   };
   const files = await readMetadata(roomId);

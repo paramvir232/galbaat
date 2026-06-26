@@ -227,7 +227,7 @@ export function registerSocketHandlers(io) {
     socket.on("participant:mute", ({ roomId, muted }) => {
       const normalizedRoomId = String(roomId || socket.data.roomId || "").toUpperCase();
       const user = rooms.get(normalizedRoomId)?.get(socket.id);
-      if (!user) return;
+      if (!user?.host) return;
       user.muted = Boolean(muted);
       emitParticipants(io, normalizedRoomId);
       touchRoom(normalizedRoomId, rooms.get(normalizedRoomId).size).catch(() => {});
@@ -286,14 +286,14 @@ export function registerSocketHandlers(io) {
       rooms.delete(normalizedRoomId);
     });
 
-    socket.on("host:mute", ({ roomId, targetId }) => {
+    socket.on("host:mute", ({ roomId, targetId, muted }) => {
       const normalizedRoomId = String(roomId || socket.data.roomId || "").toUpperCase();
       const users = rooms.get(normalizedRoomId);
       const host = users?.get(socket.id);
       const target = users?.get(targetId);
       if (!host?.host || !target) return;
-      target.muted = true;
-      io.to(targetId).emit("host:muted");
+      target.muted = Boolean(muted);
+      io.to(targetId).emit("host:muted", { muted: target.muted });
       emitParticipants(io, normalizedRoomId);
     });
 

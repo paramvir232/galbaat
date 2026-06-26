@@ -42,11 +42,11 @@ export default function ParticipantList({ participants, selfId, isHost = false, 
                 <>
                   <button
                     type="button"
-                    title="Mute participant"
-                    onClick={() => onHostMute?.(user.id)}
+                    title={user.muted ? "Unmute participant" : "Mute participant"}
+                    onClick={() => onHostMute?.(user.id, !user.muted)}
                     className="grid h-7 w-7 place-items-center rounded-md text-slate-400 hover:bg-white/10 hover:text-slate-100"
                   >
-                    <ShieldX className="h-3.5 w-3.5" />
+                    <ShieldX className={`h-3.5 w-3.5 ${user.muted ? "text-amberglow" : ""}`} />
                   </button>
                   {!user.host && (
                     <button

@@ -12,6 +12,7 @@ export function useWebRtcRoom(socket, roomId) {
   const [remoteStreams, setRemoteStreams] = useState([]);
   const peersRef = useRef(new Map());
   const audioRef = useRef(new Map());
+  const volumeRef = useRef(new Map());
   const peerStreamsRef = useRef(new Map());
   const localStreamRef = useRef(null);
   const pendingCandidatesRef = useRef(new Map());
@@ -76,6 +77,7 @@ export function useWebRtcRoom(socket, roomId) {
         audio.remove();
       }
       audioRef.current.delete(peerId);
+      volumeRef.current.delete(peerId);
       setPeerStates((current) => {
         const next = { ...current };
         delete next[peerId];
@@ -261,6 +263,7 @@ export function useWebRtcRoom(socket, roomId) {
           audio.autoplay = true;
           audio.playsInline = true;
           audio.muted = false;
+          audio.volume = volumeRef.current.get(peerId) ?? 1;
           audioRef.current.set(peerId, audio);
         }
         audio.srcObject = remoteStream;
@@ -343,6 +346,13 @@ export function useWebRtcRoom(socket, roomId) {
     };
   }, [createPeer, removePeer, socket]);
 
+  const setPeerVolume = useCallback((peerId, volume) => {
+    const nextVolume = Math.max(0, Math.min(1, Number(volume)));
+    volumeRef.current.set(peerId, nextVolume);
+    const audio = audioRef.current.get(peerId);
+    if (audio) audio.volume = nextVolume;
+  }, []);
+
   useEffect(() => {
     const peers = peersRef.current;
     const pendingCandidates = pendingCandidatesRef.current;
@@ -372,6 +382,7 @@ export function useWebRtcRoom(socket, roomId) {
     startVideo,
     stopVideo,
     startScreenShare,
+    setPeerVolume,
     audioEnabled,
     videoEnabled,
     screenSharing,

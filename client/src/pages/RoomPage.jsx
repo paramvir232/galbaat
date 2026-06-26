@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { motion } from "framer-motion";
-import { ArrowLeft, FileText, Hand, Hash, Loader2, Lock, Menu, Radio, ScreenShare, ScreenShareOff, Unlock, Video, VideoOff, Wifi, WifiOff, X } from "lucide-react";
+import { ArrowLeft, FileText, Hand, Hash, Loader2, Lock, Menu, PanelLeftClose, PanelLeftOpen, Radio, ScreenShare, ScreenShareOff, Unlock, Video, VideoOff, Wifi, WifiOff, X } from "lucide-react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import ChatPanel from "../components/ChatPanel.jsx";
 import ParticipantList from "../components/ParticipantList.jsx";
@@ -26,6 +26,7 @@ export default function RoomPage() {
     startVideo,
     stopVideo,
     startScreenShare,
+    setPeerVolume,
     audioEnabled,
     videoEnabled,
     screenSharing,
@@ -50,15 +51,30 @@ export default function RoomPage() {
   const [mobilePanel, setMobilePanel] = useState("room");
   const [handRaised, setHandRaised] = useState(false);
   const [unreadCount, setUnreadCount] = useState(0);
+  const [speakerOpen, setSpeakerOpen] = useState(false);
+  const [peerVolumes, setPeerVolumes] = useState({});
+  const [participantsCollapsed, setParticipantsCollapsed] = useState(false);
+  const [chatWidth, setChatWidth] = useState(360);
+  const [desktopLayout, setDesktopLayout] = useState(false);
   const speakingRef = useRef(false);
   const micLockedRef = useRef(false);
   const videoEnabledRef = useRef(false);
   const joinedRef = useRef(false);
   const wasScreenSharingRef = useRef(false);
+  const participantHandsRef = useRef(new Map());
+  const chatResizeRef = useRef(null);
 
   useEffect(() => {
     videoEnabledRef.current = videoEnabled;
   }, [videoEnabled]);
+
+  useEffect(() => {
+    const media = window.matchMedia("(min-width: 1024px)");
+    const updateLayout = () => setDesktopLayout(media.matches);
+    updateLayout();
+    media.addEventListener("change", updateLayout);
+    return () => media.removeEventListener("change", updateLayout);
+  }, []);
 
   useEffect(() => {
     if (wasScreenSharingRef.current && !screenSharing && connected) {
@@ -103,6 +119,27 @@ export default function RoomPage() {
     micLockedRef.current = true;
     setMicLocked(true);
   }, [connected, muted, startTalking, stopTalking]);
+
+  const playHandRaiseAlert = useCallback(() => {
+    const AudioContext = window.AudioContext || window.webkitAudioContext;
+    if (!AudioContext) return;
+    const context = new AudioContext();
+    const now = context.currentTime;
+    [660, 880].forEach((frequency, index) => {
+      const oscillator = context.createOscillator();
+      const gain = context.createGain();
+      oscillator.type = "sine";
+      oscillator.frequency.setValueAtTime(frequency, now + index * 0.12);
+      gain.gain.setValueAtTime(0.0001, now + index * 0.12);
+      gain.gain.exponentialRampToValueAtTime(0.16, now + index * 0.12 + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.0001, now + index * 0.12 + 0.16);
+      oscillator.connect(gain);
+      gain.connect(context.destination);
+      oscillator.start(now + index * 0.12);
+      oscillator.stop(now + index * 0.12 + 0.18);
+    });
+    window.setTimeout(() => context.close().catch(() => {}), 500);
+  }, []);
 
   useEffect(() => {
     joinedRef.current = false;
@@ -170,7 +207,16 @@ export default function RoomPage() {
       setStatus("reconnecting");
     }
     function onParticipantsUpdate(next) {
+      const previousHands = participantHandsRef.current;
+      const shouldAlert = next.some((user) => {
+        if (user.id === self?.id) return false;
+        return previousHands.has(user.id) && !previousHands.get(user.id) && user.handRaised;
+      });
+      participantHandsRef.current = new Map(next.map((user) => [user.id, Boolean(user.handRaised)]));
+      if (shouldAlert) playHandRaiseAlert();
       setParticipants(next);
+      const currentSelf = next.find((user) => user.id === self?.id);
+      if (currentSelf) setMuted(Boolean(currentSelf.muted));
     }
     function onJoined(user) {
       setMessages((current) => [
@@ -218,9 +264,9 @@ export default function RoomPage() {
     function onLock({ locked }) {
       setRoom((current) => (current ? { ...current, locked } : current));
     }
-    function onMutedByHost() {
-      setMuted(true);
-      stopTalking(true);
+    function onMutedByHost({ muted: nextMuted = true } = {}) {
+      setMuted(Boolean(nextMuted));
+      if (nextMuted) stopTalking(true);
     }
     function onKicked() {
       setError("You were removed from the room.");
@@ -263,7 +309,7 @@ export default function RoomPage() {
       socket.off("host:kicked", onKicked);
       socket.off("room:ended", onRoomEnded);
     };
-  }, [mobilePanel, navigate, room, self?.id, socket, stopTalking]);
+  }, [mobilePanel, navigate, playHandRaiseAlert, room, self?.id, socket, stopTalking]);
 
   useEffect(() => {
     if (mobilePanel === "chat") setUnreadCount(0);
@@ -320,8 +366,8 @@ export default function RoomPage() {
     socket.emit("room:end", { roomId });
   }
 
-  function hostMute(targetId) {
-    socket.emit("host:mute", { roomId, targetId });
+  function hostMute(targetId, muted) {
+    socket.emit("host:mute", { roomId, targetId, muted });
   }
 
   function kickParticipant(targetId) {
@@ -349,12 +395,14 @@ export default function RoomPage() {
     window.URL.revokeObjectURL(url);
   }
 
-  async function uploadFile(file) {
+  async function uploadFile(file, options = {}) {
     setFileUploading(true);
     setError("");
     try {
-      const { file: uploaded } = await uploadRoomFile(roomId, file, getGuestName());
-      setFiles((current) => (current.some((item) => item.id === uploaded.id) ? current : [...current, uploaded]));
+      const { file: uploaded } = await uploadRoomFile(roomId, file, getGuestName(), options);
+      if (!options.chatOnly) {
+        setFiles((current) => (current.some((item) => item.id === uploaded.id) ? current : [...current, uploaded]));
+      }
     } catch (err) {
       setError(err.message || "Upload failed");
     } finally {
@@ -362,11 +410,30 @@ export default function RoomPage() {
     }
   }
 
-  function toggleMute() {
-    const next = !muted;
-    setMuted(next);
-    if (next) stopTalking(true);
-    socket.emit("participant:mute", { roomId, muted: next });
+  function changePeerVolume(peerId, volume) {
+    setPeerVolumes((current) => ({ ...current, [peerId]: volume }));
+    setPeerVolume(peerId, Number(volume) / 100);
+  }
+
+  function startChatResize(event) {
+    event.preventDefault();
+    chatResizeRef.current = {
+      startX: event.clientX,
+      startWidth: chatWidth
+    };
+    window.addEventListener("pointermove", resizeChat);
+    window.addEventListener("pointerup", stopChatResize, { once: true });
+  }
+
+  function resizeChat(event) {
+    if (!chatResizeRef.current) return;
+    const nextWidth = chatResizeRef.current.startWidth + chatResizeRef.current.startX - event.clientX;
+    setChatWidth(Math.max(280, Math.min(520, nextWidth)));
+  }
+
+  function stopChatResize() {
+    chatResizeRef.current = null;
+    window.removeEventListener("pointermove", resizeChat);
   }
 
   async function toggleVideo() {
@@ -413,6 +480,9 @@ export default function RoomPage() {
   const typingUsers = Object.values(typing);
   const hasVideo = videoEnabled || remoteStreams.some(({ stream }) => stream.getVideoTracks().some((track) => track.readyState === "live"));
   const isHost = Boolean(self?.host);
+  const desktopGridColumns = participantsCollapsed
+    ? `minmax(0,1fr) ${chatWidth}px`
+    : `280px minmax(0,1fr) ${chatWidth}px`;
 
   return (
     <main className="flex h-dvh min-h-0 flex-col overflow-hidden p-2 text-slate-100 sm:p-4">
@@ -435,6 +505,14 @@ export default function RoomPage() {
             {status === "connected" ? "Connected" : status === "voice-limited" ? "Chat connected" : "Reconnecting"}
           </StatusPill>
           <ShareRoom roomId={roomId} />
+          <button
+            type="button"
+            onClick={() => setParticipantsCollapsed((collapsed) => !collapsed)}
+            title={participantsCollapsed ? "Show participants" : "Collapse participants"}
+            className="hidden h-10 w-10 place-items-center rounded-md border border-line bg-white/[0.05] text-slate-200 hover:bg-white/10 lg:grid"
+          >
+            {participantsCollapsed ? <PanelLeftOpen className="h-4 w-4" /> : <PanelLeftClose className="h-4 w-4" />}
+          </button>
           <button
             type="button"
             onClick={downloadTranscript}
@@ -463,8 +541,8 @@ export default function RoomPage() {
         </div>
       </header>
 
-      <section className="grid min-h-0 flex-1 gap-2 overflow-hidden lg:grid-cols-[260px_minmax(0,1fr)_330px] xl:grid-cols-[280px_minmax(0,1fr)_360px]">
-        <div className={`${mobilePanel === "participants" ? "block" : "hidden"} min-h-0 overflow-hidden lg:block`}>
+      <section className="grid min-h-0 flex-1 gap-2 overflow-hidden lg:grid" style={desktopLayout ? { gridTemplateColumns: desktopGridColumns } : undefined}>
+        <div className={`${mobilePanel === "participants" ? "block" : "hidden"} min-h-0 overflow-hidden ${participantsCollapsed ? "lg:hidden" : "lg:block"}`}>
           <ParticipantList participants={participants} selfId={self?.id} isHost={isHost} onHostMute={hostMute} onKick={kickParticipant} />
         </div>
 
@@ -516,8 +594,44 @@ export default function RoomPage() {
             onStart={startTalking}
             onStop={stopTalking}
             onToggleLock={toggleMicLock}
-            onToggleMute={toggleMute}
+            onToggleSpeaker={() => setSpeakerOpen((open) => !open)}
           />
+
+          {speakerOpen && (
+            <div className="w-full max-w-md rounded-lg border border-line bg-ink/70 p-4 shadow-xl">
+              <div className="mb-3 flex items-center justify-between gap-3">
+                <h3 className="text-sm font-semibold text-slate-100">Speaker volume</h3>
+                <span className="text-xs text-slate-500">Only changes what you hear</span>
+              </div>
+              <div className="space-y-3">
+                {participants.filter((user) => user.id !== self?.id).length === 0 ? (
+                  <p className="rounded-md border border-dashed border-line px-3 py-2 text-xs text-slate-500">No one else is connected yet</p>
+                ) : (
+                  participants
+                    .filter((user) => user.id !== self?.id)
+                    .map((user) => {
+                      const volume = peerVolumes[user.id] ?? 100;
+                      return (
+                        <label key={user.id} className="block rounded-md border border-line bg-white/[0.04] p-3">
+                          <div className="mb-2 flex items-center justify-between gap-3 text-sm">
+                            <span className="min-w-0 truncate font-medium text-slate-200">{user.username}</span>
+                            <span className="shrink-0 text-xs text-slate-400">{volume}%</span>
+                          </div>
+                          <input
+                            type="range"
+                            min="0"
+                            max="100"
+                            value={volume}
+                            onChange={(event) => changePeerVolume(user.id, event.target.value)}
+                            className="w-full accent-mint"
+                          />
+                        </label>
+                      );
+                    })
+                )}
+              </div>
+            </div>
+          )}
 
           <div className="flex flex-wrap items-center justify-center gap-3">
             <button
@@ -544,7 +658,13 @@ export default function RoomPage() {
           )}
         </motion.div>
 
-        <div className={`${mobilePanel === "chat" ? "block" : "hidden"} min-h-0 overflow-hidden lg:block`}>
+        <div className={`${mobilePanel === "chat" ? "block" : "hidden"} relative min-h-0 overflow-hidden lg:block`}>
+          <button
+            type="button"
+            onPointerDown={startChatResize}
+            title="Resize chat"
+            className="absolute -left-2 top-0 z-10 hidden h-full w-3 cursor-col-resize border-x border-transparent hover:border-line hover:bg-white/[0.04] lg:block"
+          />
           <ChatPanel
             messages={messages}
             files={files}
