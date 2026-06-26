@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { motion } from "framer-motion";
-import { ArrowLeft, FileText, Hand, Hash, Loader2, Lock, Menu, PanelLeftClose, PanelLeftOpen, Radio, ScreenShare, ScreenShareOff, Unlock, Video, VideoOff, Wifi, WifiOff, X } from "lucide-react";
+import { ArrowLeft, FileText, Hand, Hash, Loader2, Lock, Menu, PanelLeftOpen, Radio, ScreenShare, ScreenShareOff, Unlock, Video, VideoOff, Wifi, WifiOff, X } from "lucide-react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import ChatPanel from "../components/ChatPanel.jsx";
 import ParticipantList from "../components/ParticipantList.jsx";
@@ -51,7 +51,6 @@ export default function RoomPage() {
   const [mobilePanel, setMobilePanel] = useState("room");
   const [handRaised, setHandRaised] = useState(false);
   const [unreadCount, setUnreadCount] = useState(0);
-  const [speakerOpen, setSpeakerOpen] = useState(false);
   const [peerVolumes, setPeerVolumes] = useState({});
   const [participantsCollapsed, setParticipantsCollapsed] = useState(false);
   const [chatWidth, setChatWidth] = useState(360);
@@ -507,14 +506,6 @@ export default function RoomPage() {
           <ShareRoom roomId={roomId} />
           <button
             type="button"
-            onClick={() => setParticipantsCollapsed((collapsed) => !collapsed)}
-            title={participantsCollapsed ? "Show participants" : "Collapse participants"}
-            className="hidden h-10 w-10 place-items-center rounded-md border border-line bg-white/[0.05] text-slate-200 hover:bg-white/10 lg:grid"
-          >
-            {participantsCollapsed ? <PanelLeftOpen className="h-4 w-4" /> : <PanelLeftClose className="h-4 w-4" />}
-          </button>
-          <button
-            type="button"
             onClick={downloadTranscript}
             title="Download transcript"
             className="grid h-10 w-10 place-items-center rounded-md border border-line bg-white/[0.05] text-slate-200 hover:bg-white/10"
@@ -541,9 +532,28 @@ export default function RoomPage() {
         </div>
       </header>
 
-      <section className="grid min-h-0 flex-1 gap-2 overflow-hidden lg:grid" style={desktopLayout ? { gridTemplateColumns: desktopGridColumns } : undefined}>
+      <section className="relative grid min-h-0 flex-1 gap-2 overflow-hidden lg:grid" style={desktopLayout ? { gridTemplateColumns: desktopGridColumns } : undefined}>
+        {participantsCollapsed && (
+          <button
+            type="button"
+            onClick={() => setParticipantsCollapsed(false)}
+            title="Show participants"
+            className="absolute left-0 top-2 z-20 hidden h-10 w-10 place-items-center rounded-r-md border border-l-0 border-line bg-panel/95 text-slate-200 shadow-xl hover:bg-white/10 lg:grid"
+          >
+            <PanelLeftOpen className="h-4 w-4" />
+          </button>
+        )}
         <div className={`${mobilePanel === "participants" ? "block" : "hidden"} min-h-0 overflow-hidden ${participantsCollapsed ? "lg:hidden" : "lg:block"}`}>
-          <ParticipantList participants={participants} selfId={self?.id} isHost={isHost} onHostMute={hostMute} onKick={kickParticipant} />
+          <ParticipantList
+            participants={participants}
+            selfId={self?.id}
+            isHost={isHost}
+            peerVolumes={peerVolumes}
+            onPeerVolumeChange={changePeerVolume}
+            onCollapse={() => setParticipantsCollapsed(true)}
+            onHostMute={hostMute}
+            onKick={kickParticipant}
+          />
         </div>
 
         <motion.div
@@ -594,44 +604,7 @@ export default function RoomPage() {
             onStart={startTalking}
             onStop={stopTalking}
             onToggleLock={toggleMicLock}
-            onToggleSpeaker={() => setSpeakerOpen((open) => !open)}
           />
-
-          {speakerOpen && (
-            <div className="w-full max-w-md rounded-lg border border-line bg-ink/70 p-4 shadow-xl">
-              <div className="mb-3 flex items-center justify-between gap-3">
-                <h3 className="text-sm font-semibold text-slate-100">Speaker volume</h3>
-                <span className="text-xs text-slate-500">Only changes what you hear</span>
-              </div>
-              <div className="space-y-3">
-                {participants.filter((user) => user.id !== self?.id).length === 0 ? (
-                  <p className="rounded-md border border-dashed border-line px-3 py-2 text-xs text-slate-500">No one else is connected yet</p>
-                ) : (
-                  participants
-                    .filter((user) => user.id !== self?.id)
-                    .map((user) => {
-                      const volume = peerVolumes[user.id] ?? 100;
-                      return (
-                        <label key={user.id} className="block rounded-md border border-line bg-white/[0.04] p-3">
-                          <div className="mb-2 flex items-center justify-between gap-3 text-sm">
-                            <span className="min-w-0 truncate font-medium text-slate-200">{user.username}</span>
-                            <span className="shrink-0 text-xs text-slate-400">{volume}%</span>
-                          </div>
-                          <input
-                            type="range"
-                            min="0"
-                            max="100"
-                            value={volume}
-                            onChange={(event) => changePeerVolume(user.id, event.target.value)}
-                            className="w-full accent-mint"
-                          />
-                        </label>
-                      );
-                    })
-                )}
-              </div>
-            </div>
-          )}
 
           <div className="flex flex-wrap items-center justify-center gap-3">
             <button

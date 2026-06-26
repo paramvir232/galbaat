@@ -116,9 +116,31 @@ roomsRouter.get("/:roomId/files/:fileId/preview", ensureRoom, async (req, res, n
   try {
     const file = await getRoomFile(req.roomId, req.params.fileId);
     if (!file) return res.status(404).json({ message: "File not found" });
+    const range = req.headers.range;
+
     res.setHeader("Content-Type", file.mimeType || "application/octet-stream");
-    res.setHeader("Content-Length", file.size);
     res.setHeader("Content-Disposition", `inline; filename="${encodeURIComponent(file.originalName)}"`);
+    res.setHeader("Accept-Ranges", "bytes");
+
+    if (range) {
+      const [startPart, endPart] = range.replace(/bytes=/, "").split("-");
+      const start = Number(startPart);
+      const end = endPart ? Number(endPart) : file.size - 1;
+
+      if (!Number.isFinite(start) || !Number.isFinite(end) || start > end || end >= file.size) {
+        res.status(416).setHeader("Content-Range", `bytes */${file.size}`);
+        res.end();
+        return;
+      }
+
+      res.status(206);
+      res.setHeader("Content-Length", end - start + 1);
+      res.setHeader("Content-Range", `bytes ${start}-${end}/${file.size}`);
+      file.streamForRange(start, end).pipe(res);
+      return;
+    }
+
+    res.setHeader("Content-Length", file.size);
     file.stream.pipe(res);
   } catch (error) {
     next(error);

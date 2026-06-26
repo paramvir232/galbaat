@@ -25,6 +25,10 @@ function attachmentKind(file) {
   return "file";
 }
 
+function reactionEntries(reactions = {}) {
+  return Object.entries(reactions).filter(([, count]) => Number(count) > 0);
+}
+
 export default function ChatPanel({
   messages,
   files,
@@ -251,10 +255,11 @@ export default function ChatPanel({
       <div className="scrollbar-thin min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain p-3 sm:p-4">
         {messages.map((message) => {
           const mentioned = currentUsername && message.message?.toLowerCase().includes(`@${currentUsername.toLowerCase()}`);
+          const visibleReactions = reactionEntries(message.reactions);
           return (
             <div
               key={message.id || `${message.username}-${message.timestamp}`}
-              className={`group relative rounded-lg border p-3 ${mentioned ? "border-amberglow/40 bg-amberglow/10" : "border-transparent bg-white/[0.04]"}`}
+              className={`group relative rounded-lg border p-3 ${visibleReactions.length ? "mb-4" : ""} ${mentioned ? "border-amberglow/40 bg-amberglow/10" : "border-transparent bg-white/[0.04]"}`}
             >
               <div className="mb-1 flex items-center justify-between gap-3">
                 <span className="truncate text-sm font-semibold text-slate-100">{message.username}</span>
@@ -264,18 +269,21 @@ export default function ChatPanel({
               {(message.attachments || []).map((file) => (
                 <div key={file.id}>{renderAttachment(file)}</div>
               ))}
-              <div className="mt-2 flex flex-wrap items-center gap-1">
-                {REACTIONS.filter((emoji) => message.reactions?.[emoji]).map((emoji) => (
+              {visibleReactions.length > 0 && (
+                <div className="absolute -bottom-3 right-3 flex max-w-[calc(100%-1.5rem)] flex-wrap justify-end gap-1">
+                  {visibleReactions.map(([emoji, count]) => (
                   <button
                     key={emoji}
                     type="button"
                     onClick={() => onReact?.(message.id, emoji)}
-                    className="rounded-full border border-line bg-white/[0.04] px-2 py-1 text-xs text-slate-300 hover:bg-white/10"
+                    className="inline-flex h-7 items-center gap-1 rounded-full border border-line bg-panel px-2 text-xs text-slate-100 shadow-lg hover:bg-white/10"
                   >
-                    {emoji} {message.reactions?.[emoji] || ""}
+                    <span>{emoji}</span>
+                    {count > 1 && <span className="text-[11px] font-semibold text-slate-300">{count}</span>}
                   </button>
-                ))}
-              </div>
+                  ))}
+                </div>
+              )}
               <div className="absolute -bottom-4 right-3 hidden rounded-full border border-line bg-panel/95 p-1 shadow-xl group-hover:flex">
                 {REACTIONS.map((emoji) => (
                   <button

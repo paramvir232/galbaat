@@ -100,7 +100,8 @@ export async function getRoomFile(roomId, id) {
   return {
     ...file,
     path: resolvedPath,
-    stream: createReadStream(resolvedPath)
+    stream: createReadStream(resolvedPath),
+    streamForRange: (start, end) => createReadStream(resolvedPath, { start, end })
   };
 }
 
