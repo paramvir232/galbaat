@@ -35,6 +35,54 @@ function canReactToMessage(message) {
   return /^[a-f\d]{24}$/i.test(String(message.id || ""));
 }
 
+function encodeWav(samples, sampleRate) {
+  const length = samples.reduce((total, chunk) => total + chunk.length, 0);
+  const dataSize = length * 2;
+  const buffer = new ArrayBuffer(44 + dataSize);
+  const view = new DataView(buffer);
+  let offset = 0;
+
+  function writeString(value) {
+    for (let index = 0; index < value.length; index += 1) {
+      view.setUint8(offset, value.charCodeAt(index));
+      offset += 1;
+    }
+  }
+
+  writeString("RIFF");
+  view.setUint32(offset, 36 + dataSize, true);
+  offset += 4;
+  writeString("WAVE");
+  writeString("fmt ");
+  view.setUint32(offset, 16, true);
+  offset += 4;
+  view.setUint16(offset, 1, true);
+  offset += 2;
+  view.setUint16(offset, 1, true);
+  offset += 2;
+  view.setUint32(offset, sampleRate, true);
+  offset += 4;
+  view.setUint32(offset, sampleRate * 2, true);
+  offset += 4;
+  view.setUint16(offset, 2, true);
+  offset += 2;
+  view.setUint16(offset, 16, true);
+  offset += 2;
+  writeString("data");
+  view.setUint32(offset, dataSize, true);
+  offset += 4;
+
+  samples.forEach((chunk) => {
+    for (let index = 0; index < chunk.length; index += 1) {
+      const sample = Math.max(-1, Math.min(1, chunk[index]));
+      view.setInt16(offset, sample < 0 ? sample * 0x8000 : sample * 0x7fff, true);
+      offset += 2;
+    }
+  });
+
+  return new window.Blob([buffer], { type: "audio/wav" });
+}
+
 function activeMention(value, cursorPosition = value.length) {
   const beforeCursor = value.slice(0, cursorPosition);
   const match = /(^|\s)@([^\s@]*)$/.exec(beforeCursor);
@@ -73,6 +121,11 @@ export default function ChatPanel({
   const fileInputRef = useRef(null);
   const typingTimer = useRef(null);
   const recorderRef = useRef(null);
+  const voiceStreamRef = useRef(null);
+  const audioContextRef = useRef(null);
+  const audioProcessorRef = useRef(null);
+  const audioSamplesRef = useRef([]);
+  const audioSampleRateRef = useRef(44100);
   const chunksRef = useRef([]);
 
   useEffect(() => {
@@ -84,6 +137,13 @@ export default function ChatPanel({
       if (pendingAttachment?.url) window.URL.revokeObjectURL(pendingAttachment.url);
     };
   }, [pendingAttachment]);
+
+  useEffect(() => {
+    return () => {
+      if (recorderRef.current?.state === "recording") recorderRef.current.stop();
+      stopVoiceStream();
+    };
+  }, []);
 
   function queueAttachment(file) {
     setShowEmojis(false);
@@ -182,14 +242,79 @@ export default function ChatPanel({
     });
   }
 
+  function stopVoiceStream() {
+    audioProcessorRef.current?.disconnect();
+    audioContextRef.current?.close().catch(() => {});
+    voiceStreamRef.current?.getTracks().forEach((track) => track.stop());
+    audioProcessorRef.current = null;
+    audioContextRef.current = null;
+    voiceStreamRef.current = null;
+  }
+
+  function finishWavRecording() {
+    const samples = audioSamplesRef.current;
+    stopVoiceStream();
+    setRecording(false);
+    audioSamplesRef.current = [];
+    if (!samples.length) return;
+    const blob = encodeWav(samples, audioSampleRateRef.current);
+    if (!blob.size) return;
+    const file = new window.File([blob], `voice-note-${new Date().toISOString().replace(/[:.]/g, "-")}.wav`, {
+      type: "audio/wav"
+    });
+    queueAttachment(file);
+  }
+
+  async function startWavRecording() {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+    const AudioContext = window.AudioContext || window.webkitAudioContext;
+    if (!AudioContext) {
+      stream.getTracks().forEach((track) => track.stop());
+      throw new Error("Audio recording is not supported in this browser.");
+    }
+
+    const context = new AudioContext();
+    const source = context.createMediaStreamSource(stream);
+    const processor = context.createScriptProcessor(4096, 1, 1);
+    audioSamplesRef.current = [];
+    audioSampleRateRef.current = context.sampleRate;
+    processor.onaudioprocess = (event) => {
+      if (!recording && !audioProcessorRef.current) return;
+      audioSamplesRef.current.push(new Float32Array(event.inputBuffer.getChannelData(0)));
+    };
+    source.connect(processor);
+    processor.connect(context.destination);
+    voiceStreamRef.current = stream;
+    audioContextRef.current = context;
+    audioProcessorRef.current = processor;
+    setRecording(true);
+  }
+
   async function toggleRecording() {
     if (recording) {
-      recorderRef.current?.stop();
+      if (audioProcessorRef.current) {
+        finishWavRecording();
+      } else {
+        recorderRef.current?.stop();
+      }
       return;
     }
 
     try {
+      await startWavRecording();
+    } catch {
+      if (window.MediaRecorder) {
+        await startMediaRecorderFallback();
+        return;
+      }
+      setRecording(false);
+    }
+  }
+
+  async function startMediaRecorderFallback() {
+    try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+      voiceStreamRef.current = stream;
       chunksRef.current = [];
       const recorder = new window.MediaRecorder(stream);
       recorderRef.current = recorder;
@@ -198,6 +323,7 @@ export default function ChatPanel({
       };
       recorder.onstop = () => {
         stream.getTracks().forEach((track) => track.stop());
+        voiceStreamRef.current = null;
         setRecording(false);
         const blob = new window.Blob(chunksRef.current, { type: recorder.mimeType || "audio/webm" });
         if (!blob.size) return;
@@ -231,9 +357,7 @@ export default function ChatPanel({
 
     if (kind === "audio") {
       return (
-        <audio controls className="mt-2 w-full">
-          <source src={apiAssetUrl(file.previewUrl)} type={file.mimeType} />
-        </audio>
+        <audio controls preload="metadata" src={apiAssetUrl(file.previewUrl)} className="mt-2 w-full" />
       );
     }
 
@@ -266,7 +390,7 @@ export default function ChatPanel({
     }
 
     if (pendingAttachment.kind === "audio") {
-      return <audio controls src={pendingAttachment.url} className="w-full" />;
+      return <audio controls preload="metadata" src={pendingAttachment.url} className="w-full" />;
     }
 
     return (
@@ -352,7 +476,7 @@ export default function ChatPanel({
                 if (reactionAllowed) setReactionPickerId(message.id);
               }}
               onMouseLeave={() => setReactionPickerId((id) => (id === message.id ? null : id))}
-              className={`group relative max-w-[92%] rounded-lg border px-3 py-2 sm:max-w-[82%] ${
+              className={`group relative w-fit min-w-0 max-w-[92%] rounded-lg border px-3 py-2 sm:max-w-[82%] ${
                 isSystem
                   ? "border-transparent bg-white/[0.03] text-center"
                   : mentioned
