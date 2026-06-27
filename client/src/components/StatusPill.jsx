@@ -6,7 +6,7 @@ export default function StatusPill({ tone = "neutral", children }) {
   };
 
   return (
-    <span className={`inline-flex items-center gap-2 rounded-full border px-3 py-1 text-xs font-medium ${tones[tone]}`}>
+    <span className={`inline-flex min-h-8 items-center gap-2 rounded-full border px-3 py-1 text-xs font-medium ${tones[tone]}`}>
       <span className="h-1.5 w-1.5 rounded-full bg-current" />
       {children}
     </span>

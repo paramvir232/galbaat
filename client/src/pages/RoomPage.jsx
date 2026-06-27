@@ -237,7 +237,10 @@ export default function RoomPage() {
       if (shouldAlert) playHandRaiseAlert();
       setParticipants(next);
       const currentSelf = next.find((user) => user.id === self?.id);
-      if (currentSelf) setMuted(Boolean(currentSelf.muted));
+      if (currentSelf) {
+        setSelf(currentSelf);
+        setMuted(Boolean(currentSelf.muted));
+      }
     }
     function onJoined(user) {
       setMessages((current) => [
@@ -370,6 +373,30 @@ export default function RoomPage() {
   }
 
   function reactToMessage(messageId, emoji) {
+    setMessages((current) =>
+      current.map((message) => {
+        if (message.id !== messageId || message.deletedAt) return message;
+        const currentReactions = message.reactions || {};
+        const previousEmoji = message.myReaction;
+        const isRemoving = previousEmoji === emoji;
+        const nextReactions = { ...currentReactions };
+
+        if (previousEmoji && nextReactions[previousEmoji]) {
+          nextReactions[previousEmoji] = Math.max(0, Number(nextReactions[previousEmoji]) - 1);
+          if (nextReactions[previousEmoji] === 0) delete nextReactions[previousEmoji];
+        }
+
+        if (!isRemoving) {
+          nextReactions[emoji] = Number(nextReactions[emoji] || 0) + 1;
+        }
+
+        return {
+          ...message,
+          reactions: nextReactions,
+          myReaction: isRemoving ? null : emoji
+        };
+      })
+    );
     socket.emit("chat:reaction", { roomId, messageId, emoji });
   }
 
@@ -401,6 +428,12 @@ export default function RoomPage() {
 
   function hostMute(targetId, muted) {
     socket.emit("host:mute", { roomId, targetId, muted });
+  }
+
+  function selfMute(nextMuted) {
+    if (nextMuted) stopTalking(true);
+    setMuted(Boolean(nextMuted));
+    socket.emit("participant:mute", { roomId, muted: nextMuted });
   }
 
   function kickParticipant(targetId) {
@@ -508,17 +541,18 @@ export default function RoomPage() {
 
   const statusTone = status === "connected" ? "good" : status === "voice-limited" ? "warn" : "neutral";
   const typingUsers = Object.values(typing);
-  const hasVideo = videoEnabled || remoteStreams.some(({ stream }) => stream.getVideoTracks().some((track) => track.readyState === "live"));
+  const hasRemoteVideo = participants.some((user) => user.id !== self?.id && (user.video || user.screenSharing));
+  const hasVideo = videoEnabled || hasRemoteVideo;
   const isHost = Boolean(self?.host);
   const desktopGridColumns = participantsCollapsed
     ? `minmax(${ROOM_MIN_WIDTH_WITHOUT_PARTICIPANTS}px,1fr) minmax(${MIN_CHAT_WIDTH}px,${chatWidth}px)`
     : `280px minmax(${ROOM_MIN_WIDTH}px,1fr) minmax(${MIN_CHAT_WIDTH}px,${chatWidth}px)`;
 
   return (
-    <main className="flex h-dvh min-h-0 flex-col overflow-hidden p-2 text-slate-100 sm:p-4">
-      <header className="glass mb-2 flex shrink-0 flex-wrap items-center justify-between gap-2 rounded-lg px-3 py-3 sm:mb-3 sm:gap-3 sm:px-4">
-        <div className="flex min-w-[12rem] flex-1 items-center gap-2 sm:gap-3">
-          <Link to="/" className="grid h-10 w-10 shrink-0 place-items-center rounded-md border border-line bg-white/[0.04] text-slate-300 hover:bg-white/10">
+    <main className="flex h-dvh min-h-0 flex-col overflow-hidden p-1.5 text-slate-100 sm:p-4">
+      <header className="glass mb-2 flex shrink-0 flex-col gap-2 rounded-lg px-2.5 py-2.5 sm:mb-3 sm:flex-row sm:items-center sm:justify-between sm:gap-3 sm:px-4 sm:py-3">
+        <div className="flex w-full min-w-0 flex-1 items-center gap-2 sm:w-auto sm:gap-3">
+          <Link to="/" className="grid h-11 w-11 shrink-0 place-items-center rounded-md border border-line bg-white/[0.04] text-slate-300 hover:bg-white/10 sm:h-10 sm:w-10">
             <ArrowLeft className="h-4 w-4" />
           </Link>
           <div className="min-w-0">
@@ -530,7 +564,7 @@ export default function RoomPage() {
           </div>
         </div>
 
-        <div className="flex flex-wrap items-center justify-end gap-2">
+        <div className="flex w-full flex-wrap items-center justify-between gap-1.5 sm:w-auto sm:justify-end sm:gap-2">
           <StatusPill tone={statusTone}>
             {status === "connected" ? "Connected" : status === "voice-limited" ? "Chat connected" : "Reconnecting"}
           </StatusPill>
@@ -539,7 +573,7 @@ export default function RoomPage() {
             type="button"
             onClick={downloadTranscript}
             title="Download transcript"
-            className="grid h-10 w-10 place-items-center rounded-md border border-line bg-white/[0.05] text-slate-200 hover:bg-white/10"
+            className="grid h-11 w-11 place-items-center rounded-md border border-line bg-white/[0.05] text-slate-200 hover:bg-white/10 sm:h-10 sm:w-10"
           >
             <FileText className="h-4 w-4" />
           </button>
@@ -548,7 +582,7 @@ export default function RoomPage() {
               type="button"
               onClick={toggleLock}
               title={room?.locked ? "Unlock room" : "Lock room"}
-              className="grid h-10 w-10 place-items-center rounded-md border border-line bg-white/[0.05] text-slate-200 hover:bg-white/10"
+              className="grid h-11 w-11 place-items-center rounded-md border border-line bg-white/[0.05] text-slate-200 hover:bg-white/10 sm:h-10 sm:w-10"
             >
               {room?.locked ? <Lock className="h-4 w-4 text-amberglow" /> : <Unlock className="h-4 w-4" />}
             </button>
@@ -556,7 +590,7 @@ export default function RoomPage() {
           <button
             type="button"
             onClick={() => setMobilePanel((panel) => (panel === "room" ? "chat" : "room"))}
-            className="grid h-10 w-10 place-items-center rounded-md border border-line bg-white/[0.05] md:hidden"
+            className="grid h-11 w-11 place-items-center rounded-md border border-line bg-white/[0.05] md:hidden"
           >
             {mobilePanel === "room" ? <Menu className="h-4 w-4" /> : <X className="h-4 w-4" />}
           </button>
@@ -582,20 +616,21 @@ export default function RoomPage() {
             peerVolumes={peerVolumes}
             onPeerVolumeChange={changePeerVolume}
             onCollapse={() => setParticipantsCollapsed(true)}
+            onSelfMute={selfMute}
             onHostMute={hostMute}
             onKick={kickParticipant}
           />
         </div>
 
         <motion.div
-          className={`${mobilePanel === "room" ? "flex" : "hidden"} glass min-h-0 flex-col items-center gap-4 overflow-y-auto rounded-lg p-3 sm:gap-5 sm:p-5 lg:flex xl:p-6`}
+          className={`${mobilePanel === "room" ? "flex" : "hidden"} glass min-h-0 flex-col items-center gap-3 overflow-y-auto rounded-lg p-2.5 sm:gap-5 sm:p-5 lg:flex xl:p-6`}
         >
-          <div className="flex w-full flex-wrap items-center justify-center gap-2 sm:gap-3">
-            <div className="inline-flex items-center gap-2 rounded-full border border-line bg-white/[0.04] px-3 py-2 text-xs text-slate-300 sm:px-4 sm:text-sm">
+          <div className="grid w-full grid-cols-2 gap-2 sm:flex sm:flex-wrap sm:items-center sm:justify-center sm:gap-3">
+            <div className="inline-flex min-h-11 items-center justify-center gap-2 rounded-full border border-line bg-white/[0.04] px-3 py-2 text-xs text-slate-300 sm:min-h-0 sm:px-4 sm:text-sm">
               {connected ? <Wifi className="h-4 w-4 text-mint" /> : <WifiOff className="h-4 w-4 text-amberglow" />}
               {participants.length} online
             </div>
-            <div className="inline-flex items-center gap-2 rounded-full border border-line bg-white/[0.04] px-3 py-2 text-xs text-slate-300 sm:px-4 sm:text-sm">
+            <div className="inline-flex min-h-11 items-center justify-center gap-2 rounded-full border border-line bg-white/[0.04] px-3 py-2 text-xs text-slate-300 sm:min-h-0 sm:px-4 sm:text-sm">
               <Radio className={`h-4 w-4 ${audioEnabled ? "text-mint" : "text-slate-500"}`} />
               {audioEnabled ? "Broadcasting" : "Listening"}
             </div>
@@ -603,23 +638,25 @@ export default function RoomPage() {
               type="button"
               disabled={!connected || videoBusy}
               onClick={toggleVideo}
-              className={`inline-flex items-center gap-2 rounded-full border px-3 py-2 text-xs font-medium transition disabled:cursor-not-allowed disabled:opacity-60 sm:px-4 sm:text-sm ${
+              className={`inline-flex min-h-11 items-center justify-center gap-2 rounded-full border px-3 py-2 text-xs font-medium transition disabled:cursor-not-allowed disabled:opacity-60 sm:min-h-0 sm:px-4 sm:text-sm ${
                 videoEnabled ? "border-mint/40 bg-mint/10 text-mint" : "border-line bg-white/[0.04] text-slate-300 hover:bg-white/10"
               }`}
             >
               {videoBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : videoEnabled ? <Video className="h-4 w-4" /> : <VideoOff className="h-4 w-4" />}
-              {videoEnabled ? "Camera on" : "Camera off"}
+              <span className="sm:hidden">{videoEnabled ? "Camera" : "Camera"}</span>
+              <span className="hidden sm:inline">{videoEnabled ? "Camera on" : "Camera off"}</span>
             </button>
             <button
               type="button"
               disabled={!connected || videoBusy}
               onClick={toggleScreenShare}
-              className={`inline-flex items-center gap-2 rounded-full border px-3 py-2 text-xs font-medium transition disabled:cursor-not-allowed disabled:opacity-60 sm:px-4 sm:text-sm ${
+              className={`inline-flex min-h-11 items-center justify-center gap-2 rounded-full border px-3 py-2 text-xs font-medium transition disabled:cursor-not-allowed disabled:opacity-60 sm:min-h-0 sm:px-4 sm:text-sm ${
                 screenSharing ? "border-mint/40 bg-mint/10 text-mint" : "border-line bg-white/[0.04] text-slate-300 hover:bg-white/10"
               }`}
             >
               {screenSharing ? <ScreenShareOff className="h-4 w-4" /> : <ScreenShare className="h-4 w-4" />}
-              {screenSharing ? "Stop share" : "Share screen"}
+              <span className="sm:hidden">{screenSharing ? "Stop" : "Share"}</span>
+              <span className="hidden sm:inline">{screenSharing ? "Stop share" : "Share screen"}</span>
             </button>
           </div>
 
@@ -636,11 +673,11 @@ export default function RoomPage() {
             onToggleLock={toggleMicLock}
           />
 
-          <div className="flex flex-wrap items-center justify-center gap-3">
+          <div className="grid w-full grid-cols-2 gap-2 sm:flex sm:w-auto sm:flex-wrap sm:items-center sm:justify-center sm:gap-3">
             <button
               type="button"
               onClick={toggleHand}
-              className={`inline-flex items-center gap-2 rounded-full border px-4 py-2 text-sm font-medium transition ${
+              className={`inline-flex min-h-11 items-center justify-center gap-2 rounded-full border px-3 py-2 text-sm font-medium transition sm:px-4 ${
                 handRaised ? "border-amberglow/50 bg-amberglow/10 text-amberglow" : "border-line bg-white/[0.05] text-slate-200 hover:bg-white/10"
               }`}
             >
@@ -648,7 +685,7 @@ export default function RoomPage() {
               {handRaised ? "Lower hand" : "Raise hand"}
             </button>
             {isHost && (
-              <button type="button" onClick={endRoom} className="rounded-full border border-red-400/30 bg-red-500/10 px-4 py-2 text-sm font-medium text-red-100 hover:bg-red-500/20">
+              <button type="button" onClick={endRoom} className="min-h-11 rounded-full border border-red-400/30 bg-red-500/10 px-3 py-2 text-sm font-medium text-red-100 hover:bg-red-500/20 sm:px-4">
                 End room
               </button>
             )}
@@ -670,6 +707,7 @@ export default function RoomPage() {
           />
           <ChatPanel
             messages={messages}
+            participants={participants}
             typingUsers={typingUsers}
             fileUploading={fileUploading}
             currentUsername={self?.username || getGuestName()}
@@ -684,25 +722,25 @@ export default function RoomPage() {
         </div>
       </section>
 
-      <nav className="mt-2 grid shrink-0 grid-cols-3 gap-2 pb-[var(--safe-bottom)] lg:hidden">
+      <nav className="mt-1.5 grid shrink-0 grid-cols-3 gap-1.5 pb-[var(--safe-bottom)] sm:mt-2 sm:gap-2 lg:hidden">
         <button
           type="button"
           onClick={() => setMobilePanel("room")}
-          className={`rounded-md border px-3 py-3 text-sm ${mobilePanel === "room" ? "border-mint/40 bg-mint/10 text-mint" : "border-line bg-white/[0.05] text-slate-200"}`}
+          className={`min-h-11 rounded-md border px-2 py-2.5 text-sm ${mobilePanel === "room" ? "border-mint/40 bg-mint/10 text-mint" : "border-line bg-white/[0.05] text-slate-200"}`}
         >
           Room
         </button>
         <button
           type="button"
           onClick={() => setMobilePanel("participants")}
-          className={`rounded-md border px-3 py-3 text-sm ${mobilePanel === "participants" ? "border-mint/40 bg-mint/10 text-mint" : "border-line bg-white/[0.05] text-slate-200"}`}
+          className={`min-h-11 rounded-md border px-2 py-2.5 text-sm ${mobilePanel === "participants" ? "border-mint/40 bg-mint/10 text-mint" : "border-line bg-white/[0.05] text-slate-200"}`}
         >
           People
         </button>
         <button
           type="button"
           onClick={() => setMobilePanel("chat")}
-          className={`rounded-md border px-3 py-3 text-sm ${mobilePanel === "chat" ? "border-mint/40 bg-mint/10 text-mint" : "border-line bg-white/[0.05] text-slate-200"}`}
+          className={`min-h-11 rounded-md border px-2 py-2.5 text-sm ${mobilePanel === "chat" ? "border-mint/40 bg-mint/10 text-mint" : "border-line bg-white/[0.05] text-slate-200"}`}
         >
           Chat{unreadCount ? ` (${unreadCount})` : ""}
         </button>

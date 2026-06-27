@@ -19,7 +19,9 @@ function publicUser(user) {
     username: user.username,
     host: user.host,
     speaking: user.speaking,
-    muted: user.muted,
+    muted: Boolean(user.selfMuted || user.hostMuted),
+    selfMuted: Boolean(user.selfMuted),
+    hostMuted: Boolean(user.hostMuted),
     video: user.video,
     handRaised: user.handRaised,
     screenSharing: user.screenSharing,
@@ -139,7 +141,8 @@ export function registerSocketHandlers(io) {
           username: cleanUsername(username),
           host: users.size === 0,
           speaking: false,
-          muted: false,
+          selfMuted: false,
+          hostMuted: false,
           video: false,
           handRaised: false,
           screenSharing: false,
@@ -321,8 +324,8 @@ export function registerSocketHandlers(io) {
     socket.on("participant:mute", ({ roomId, muted }) => {
       const normalizedRoomId = String(roomId || socket.data.roomId || "").toUpperCase();
       const user = rooms.get(normalizedRoomId)?.get(socket.id);
-      if (!user?.host) return;
-      user.muted = Boolean(muted);
+      if (!user) return;
+      user.selfMuted = Boolean(muted);
       emitParticipants(io, normalizedRoomId);
       touchRoom(normalizedRoomId, rooms.get(normalizedRoomId).size).catch(() => {});
     });
@@ -389,8 +392,8 @@ export function registerSocketHandlers(io) {
       const host = users?.get(socket.id);
       const target = users?.get(targetId);
       if (!host?.host || !target) return;
-      target.muted = Boolean(muted);
-      io.to(targetId).emit("host:muted", { muted: target.muted });
+      target.hostMuted = Boolean(muted);
+      io.to(targetId).emit("host:muted", { muted: Boolean(target.selfMuted || target.hostMuted) });
       emitParticipants(io, normalizedRoomId);
     });
 

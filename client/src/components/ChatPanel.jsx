@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import DOMPurify from "dompurify";
-import { Check, Download, Edit3, File as FileIcon, Loader2, Mic, Plus, Send, Smile, Square, Trash2, X } from "lucide-react";
+import { Check, Download, Edit3, File as FileIcon, Loader2, Mic, Plus, Send, Smile, Square, Trash2, UserRound, UsersRound, X } from "lucide-react";
 import { apiAssetUrl } from "../lib/api";
 import { formatTime } from "../lib/time";
 
@@ -35,8 +35,20 @@ function canReactToMessage(message) {
   return /^[a-f\d]{24}$/i.test(String(message.id || ""));
 }
 
+function activeMention(value, cursorPosition = value.length) {
+  const beforeCursor = value.slice(0, cursorPosition);
+  const match = /(^|\s)@([^\s@]*)$/.exec(beforeCursor);
+  if (!match) return null;
+  return {
+    start: beforeCursor.lastIndexOf("@"),
+    end: cursorPosition,
+    query: match[2].toLowerCase()
+  };
+}
+
 export default function ChatPanel({
   messages,
+  participants = [],
   typingUsers,
   fileUploading,
   currentUsername,
@@ -54,8 +66,10 @@ export default function ChatPanel({
   const [recording, setRecording] = useState(false);
   const [pendingAttachment, setPendingAttachment] = useState(null);
   const [editingMessage, setEditingMessage] = useState(null);
+  const [mention, setMention] = useState(null);
   const [imagePreview, setImagePreview] = useState(null);
   const endRef = useRef(null);
+  const inputRef = useRef(null);
   const fileInputRef = useRef(null);
   const typingTimer = useRef(null);
   const recorderRef = useRef(null);
@@ -92,10 +106,20 @@ export default function ChatPanel({
   }
 
   function handleChange(event) {
-    setValue(event.target.value);
+    const nextValue = event.target.value;
+    setValue(nextValue);
+    setMention(activeMention(nextValue, event.target.selectionStart));
     onTypingStart();
     window.clearTimeout(typingTimer.current);
     typingTimer.current = window.setTimeout(onTypingStop, 900);
+  }
+
+  function refreshMention() {
+    window.requestAnimationFrame(() => {
+      const input = inputRef.current;
+      if (!input) return;
+      setMention(activeMention(input.value, input.selectionStart));
+    });
   }
 
   function submit(event) {
@@ -106,6 +130,7 @@ export default function ChatPanel({
       clearPendingAttachment();
       setValue("");
       setShowEmojis(false);
+      setMention(null);
       onTypingStop();
       return;
     }
@@ -114,6 +139,7 @@ export default function ChatPanel({
     onSend(clean);
     setValue("");
     setShowEmojis(false);
+    setMention(null);
     onTypingStop();
   }
 
@@ -136,6 +162,24 @@ export default function ChatPanel({
       lastModified: file.lastModified || Date.now()
     });
     queueAttachment(namedFile);
+  }
+
+  function insertMention(username) {
+    const input = inputRef.current;
+    const currentMention = mention || activeMention(value, input?.selectionStart ?? value.length);
+    if (!currentMention) return;
+    const nextValue = `${value.slice(0, currentMention.start)}@${username} ${value.slice(currentMention.end)}`;
+    const nextCursor = currentMention.start + username.length + 2;
+    setValue(nextValue);
+    setMention(null);
+    setShowEmojis(false);
+    onTypingStart();
+    window.clearTimeout(typingTimer.current);
+    typingTimer.current = window.setTimeout(onTypingStop, 900);
+    window.requestAnimationFrame(() => {
+      inputRef.current?.focus();
+      inputRef.current?.setSelectionRange(nextCursor, nextCursor);
+    });
   }
 
   async function toggleRecording() {
@@ -178,7 +222,7 @@ export default function ChatPanel({
         <button
           type="button"
           onClick={() => setImagePreview({ url: previewUrl, name: file.originalName })}
-          className="mt-3 block w-full overflow-hidden rounded-md border border-line bg-ink/50 text-left hover:border-mint/50"
+          className="mt-2 block w-full overflow-hidden rounded-md border border-line bg-ink/50 text-left hover:border-mint/50"
         >
           <img src={previewUrl} alt={file.originalName} className="max-h-72 w-full object-contain" />
         </button>
@@ -187,7 +231,7 @@ export default function ChatPanel({
 
     if (kind === "audio") {
       return (
-        <audio controls className="mt-3 w-full">
+        <audio controls className="mt-2 w-full">
           <source src={apiAssetUrl(file.previewUrl)} type={file.mimeType} />
         </audio>
       );
@@ -197,7 +241,7 @@ export default function ChatPanel({
       <a
         href={apiAssetUrl(file.downloadUrl)}
         download
-        className="mt-3 flex items-center gap-2 rounded-md border border-line bg-ink/50 px-3 py-2 text-sm text-slate-200 hover:bg-white/10"
+        className="mt-2 flex items-center gap-2 rounded-md border border-line bg-ink/50 px-3 py-2 text-sm text-slate-200 hover:bg-white/10"
       >
         <FileIcon className="h-4 w-4 text-skyglass" />
         <span className="min-w-0 flex-1 truncate">{file.originalName}</span>
@@ -261,6 +305,22 @@ export default function ChatPanel({
     onDelete?.(messageId);
   }
 
+  const mentionOptions = mention
+    ? (() => {
+        const selfParticipant = participants.find((participant) => participant.username === currentUsername);
+        return [
+        { id: "all", username: "all", subtitle: "Mention all members in this chat", all: true },
+        ...participants
+          .filter((user) => user.username)
+          .map((user) => ({
+            id: user.id,
+            username: user.username,
+            subtitle: user.id === selfParticipant?.id ? "You" : "Online"
+          }))
+        ].filter((user) => user.username.toLowerCase().includes(mention.query));
+      })()
+    : [];
+
   return (
     <aside className="glass flex h-full min-h-0 min-w-0 flex-col overflow-hidden rounded-lg">
       <div className="shrink-0 border-b border-line p-3 sm:p-4">
@@ -272,7 +332,7 @@ export default function ChatPanel({
 
       <input ref={fileInputRef} type="file" className="hidden" onChange={handleFileChange} />
 
-      <div className="scrollbar-thin min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain p-3 sm:p-4">
+      <div className="scrollbar-thin min-h-0 flex-1 space-y-2.5 overflow-y-auto overscroll-contain p-2.5 sm:p-4">
         {messages.map((message) => {
           const isSystem = message.username === "System";
           const isOwn = !isSystem && currentUsername && message.username === currentUsername;
@@ -292,7 +352,7 @@ export default function ChatPanel({
                 if (reactionAllowed) setReactionPickerId(message.id);
               }}
               onMouseLeave={() => setReactionPickerId((id) => (id === message.id ? null : id))}
-              className={`group relative max-w-[88%] rounded-lg border p-3 sm:max-w-[82%] ${
+              className={`group relative max-w-[92%] rounded-lg border px-3 py-2 sm:max-w-[82%] ${
                 isSystem
                   ? "border-transparent bg-white/[0.03] text-center"
                   : mentioned
@@ -302,8 +362,8 @@ export default function ChatPanel({
                       : "rounded-bl-sm border-transparent bg-white/[0.04]"
               } ${isDeleted ? "border-dashed bg-white/[0.025]" : ""}`}
             >
-              <div className="mb-1 flex items-center justify-between gap-3">
-                <span className={`truncate text-sm font-semibold ${isOwn ? "text-mint" : "text-slate-100"}`}>{isOwn ? "You" : message.username}</span>
+              <div className="mb-0.5 flex items-center justify-between gap-3">
+                <span className={`truncate text-xs font-semibold ${isOwn ? "text-mint" : "text-slate-100"}`}>{isOwn ? "You" : message.username}</span>
                 <span className="flex shrink-0 items-center gap-1">
                   {canManage && !isEditing && (
                     <span className="flex items-center gap-0.5 opacity-0 transition group-hover:opacity-100 group-focus-within:opacity-100">
@@ -329,7 +389,7 @@ export default function ChatPanel({
                 </span>
               </div>
               {isDeleted ? (
-                <p className="break-anywhere text-sm italic leading-6 text-slate-500 [overflow-wrap:anywhere]">This message was deleted</p>
+                <p className="break-anywhere text-sm italic leading-5 text-slate-500 [overflow-wrap:anywhere]">This message was deleted</p>
               ) : isEditing ? (
                 <div className="space-y-2">
                   <textarea
@@ -361,7 +421,7 @@ export default function ChatPanel({
                 </div>
               ) : (
                 <>
-                  {message.message && <p className="break-anywhere text-sm leading-6 text-slate-200 [overflow-wrap:anywhere]">{message.message}</p>}
+                  {message.message && <p className="break-anywhere text-sm leading-5 text-slate-200 [overflow-wrap:anywhere]">{message.message}</p>}
                   {(message.attachments || []).map((file) => (
                     <div key={file.id}>{renderAttachment(file)}</div>
                   ))}
@@ -407,9 +467,9 @@ export default function ChatPanel({
         <div ref={endRef} />
       </div>
 
-      <form onSubmit={submit} onPaste={handlePaste} className="relative shrink-0 border-t border-line p-3">
+      <form onSubmit={submit} onPaste={handlePaste} className="relative shrink-0 border-t border-line p-2.5 sm:p-3">
         {showEmojis && (
-          <div className="absolute bottom-16 left-3 z-20 grid grid-cols-5 gap-1 rounded-lg border border-line bg-panel p-2 shadow-2xl">
+          <div className="absolute bottom-16 left-2.5 z-20 grid grid-cols-5 gap-1 rounded-lg border border-line bg-panel p-2 shadow-2xl sm:left-3">
             {EMOJIS.map((emoji) => (
               <button
                 type="button"
@@ -424,7 +484,7 @@ export default function ChatPanel({
           </div>
         )}
         {pendingAttachment && (
-          <div className="mb-3 rounded-lg border border-line bg-white/[0.04] p-3">
+          <div className="mb-2.5 rounded-lg border border-line bg-white/[0.04] p-2.5 sm:mb-3 sm:p-3">
             <div className="mb-2 flex items-center justify-between gap-3">
               <span className="min-w-0 truncate text-xs font-semibold uppercase text-slate-400">{pendingAttachment.name}</span>
               <button
@@ -439,28 +499,54 @@ export default function ChatPanel({
             {renderPendingAttachment()}
           </div>
         )}
-        <div className="flex min-w-0 items-center gap-1 rounded-lg border border-line bg-ink/50 p-2 sm:gap-2">
+        {mention && mentionOptions.length > 0 && (
+          <div className="scrollbar-thin absolute bottom-16 left-2.5 right-2.5 z-30 max-h-[min(18rem,48dvh)] overflow-y-auto rounded-xl border border-line bg-ink/95 p-2 shadow-2xl backdrop-blur sm:left-3 sm:right-3">
+            {mentionOptions.map((user) => (
+              <button
+                key={user.id}
+                type="button"
+                onMouseDown={(event) => event.preventDefault()}
+                onClick={() => insertMention(user.username)}
+                className="flex min-h-12 w-full items-center gap-3 rounded-lg px-3 py-2 text-left hover:bg-white/[0.08]"
+              >
+                <span className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-white/[0.08] text-slate-300">
+                  {user.all ? <UsersRound className="h-5 w-5" /> : <UserRound className="h-5 w-5" />}
+                </span>
+                <span className="min-w-0">
+                  <span className="block truncate text-sm font-semibold text-slate-100">{user.username}</span>
+                  <span className="block truncate text-xs text-slate-500">{user.subtitle}</span>
+                </span>
+              </button>
+            ))}
+          </div>
+        )}
+        <div className="flex min-w-0 items-center gap-1 rounded-lg border border-line bg-ink/50 p-1.5 sm:gap-2 sm:p-2">
           <button
             type="button"
             title="Emoji"
-            className="grid h-10 w-9 shrink-0 place-items-center rounded-md text-slate-400 hover:bg-white/[0.08] hover:text-slate-100 sm:w-10"
+            className="grid h-11 w-10 shrink-0 place-items-center rounded-md text-slate-400 hover:bg-white/[0.08] hover:text-slate-100 sm:h-10 sm:w-10"
             onClick={() => setShowEmojis((show) => !show)}
           >
             <Smile className="h-5 w-5" />
           </button>
           <input
+            ref={inputRef}
             value={value}
             onChange={handleChange}
+            onClick={refreshMention}
+            onKeyUp={refreshMention}
+            onFocus={refreshMention}
+            onBlur={() => window.setTimeout(() => setMention(null), 120)}
             maxLength={1000}
             placeholder="Message, @mention, or paste an image"
-            className="min-w-0 flex-1 basis-0 bg-transparent text-base text-slate-100 outline-none placeholder:text-slate-500 sm:text-sm"
+            className="min-h-11 min-w-0 flex-1 basis-0 bg-transparent px-1 text-base text-slate-100 outline-none placeholder:text-slate-500 sm:min-h-10 sm:text-sm"
           />
           <button
             type="button"
             title="Attach file"
             disabled={fileUploading || Boolean(pendingAttachment)}
             onClick={() => fileInputRef.current?.click()}
-            className="grid h-10 w-9 shrink-0 place-items-center rounded-md text-slate-400 hover:bg-white/[0.08] hover:text-slate-100 disabled:cursor-not-allowed disabled:opacity-50 sm:w-10"
+            className="grid h-11 w-10 shrink-0 place-items-center rounded-md text-slate-400 hover:bg-white/[0.08] hover:text-slate-100 disabled:cursor-not-allowed disabled:opacity-50 sm:h-10 sm:w-10"
           >
             {fileUploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-5 w-5" />}
           </button>
@@ -468,7 +554,7 @@ export default function ChatPanel({
             type="button"
             title={recording ? "Stop voice note" : "Record voice note"}
             onClick={toggleRecording}
-            className={`grid h-10 w-9 shrink-0 place-items-center rounded-md sm:w-10 ${
+            className={`grid h-11 w-10 shrink-0 place-items-center rounded-md sm:h-10 sm:w-10 ${
               recording ? "bg-red-500/20 text-red-200" : "text-slate-400 hover:bg-white/[0.08] hover:text-slate-100"
             }`}
           >
@@ -478,7 +564,7 @@ export default function ChatPanel({
             type="submit"
             title="Send"
             disabled={fileUploading}
-            className="grid h-10 w-9 shrink-0 place-items-center rounded-md bg-mint text-ink hover:bg-mint/90 disabled:cursor-not-allowed disabled:opacity-60 sm:w-10"
+            className="grid h-11 w-10 shrink-0 place-items-center rounded-md bg-mint text-ink hover:bg-mint/90 disabled:cursor-not-allowed disabled:opacity-60 sm:h-10 sm:w-10"
           >
             <Send className="h-4 w-4" />
           </button>
