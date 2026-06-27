@@ -276,7 +276,6 @@ export function useWebRtcRoom(socket, roomId) {
       };
 
       pc.ontrack = (event) => {
-        const remoteStream = event.streams[0];
         const displayStream = peerStreamsRef.current.get(peerId) || new MediaStream();
         if (event.track.kind === "video") {
           displayStream.getVideoTracks().forEach((track) => {
@@ -293,17 +292,19 @@ export function useWebRtcRoom(socket, roomId) {
         event.track.onunmute = refreshRemoteStreamsState;
         refreshRemoteStreamsState();
 
-        let audio = audioRef.current.get(peerId);
-        if (!audio) {
-          audio = new Audio();
-          audio.autoplay = true;
-          audio.playsInline = true;
-          audio.muted = false;
-          audio.volume = volumeRef.current.get(peerId) ?? 1;
-          audioRef.current.set(peerId, audio);
+        if (event.track.kind === "audio") {
+          let audio = audioRef.current.get(peerId);
+          if (!audio) {
+            audio = new Audio();
+            audio.autoplay = true;
+            audio.playsInline = true;
+            audio.muted = false;
+            audio.volume = volumeRef.current.get(peerId) ?? 1;
+            audioRef.current.set(peerId, audio);
+          }
+          audio.srcObject = new MediaStream([event.track]);
+          audio.play().catch(() => {});
         }
-        audio.srcObject = remoteStream;
-        audio.play().catch(() => {});
       };
 
       peersRef.current.set(peerId, pc);
