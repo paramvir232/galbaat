@@ -1,3 +1,4 @@
+import { Board } from "../models/Board.js";
 import { Message } from "../models/Message.js";
 import { Room } from "../models/Room.js";
 import mongoose from "mongoose";
@@ -53,6 +54,40 @@ function publicMessage(message) {
     deletedAt: message.deletedAt || null,
     timestamp: message.timestamp
   };
+}
+
+function cleanBoardElement(element) {
+  const type = cleanText(element?.type, 24);
+  const allowedTypes = new Set(["pen", "highlighter", "line", "arrow", "rectangle", "diamond", "circle", "text"]);
+  if (!allowedTypes.has(type)) return null;
+
+  const points = Array.isArray(element.points)
+    ? element.points
+        .slice(0, 2000)
+        .map((point) => [Number(point?.[0]) || 0, Number(point?.[1]) || 0])
+    : undefined;
+
+  return {
+    id: cleanText(element.id, 80) || `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+    type,
+    x: Number(element.x) || 0,
+    y: Number(element.y) || 0,
+    width: Number(element.width) || 0,
+    height: Number(element.height) || 0,
+    rotation: Number(element.rotation) || 0,
+    text: cleanText(element.text, 400),
+    points,
+    stroke: /^#[0-9a-f]{6}$/i.test(String(element.stroke || "")) ? element.stroke : "#f8fafc",
+    fill: element.fill === "transparent" || /^#[0-9a-f]{6}$/i.test(String(element.fill || "")) ? element.fill : "transparent",
+    strokeWidth: Math.max(1, Math.min(40, Number(element.strokeWidth) || 4)),
+    opacity: Math.max(0.05, Math.min(1, Number(element.opacity) || 1))
+  };
+}
+
+function cleanBoardState(state = {}) {
+  const elements = Array.isArray(state.elements) ? state.elements.map(cleanBoardElement).filter(Boolean).slice(-1200) : [];
+  const background = /^#[0-9a-f]{6}$/i.test(String(state.background || "")) ? state.background : "#0f172a";
+  return { elements, background };
 }
 
 function cancelEmptyRoomCleanup(roomId) {
@@ -140,6 +175,7 @@ export function registerSocketHandlers(io) {
           id: socket.id,
           username: cleanUsername(username),
           host: users.size === 0,
+          cursorColor: ["#29d3a7", "#8ab4ff", "#f59e0b", "#f472b6", "#a78bfa", "#22d3ee"][users.size % 6],
           speaking: false,
           selfMuted: false,
           hostMuted: false,
@@ -375,6 +411,110 @@ export function registerSocketHandlers(io) {
       if (nextSharing) user.video = true;
       else if (wasSharing) user.video = false;
       emitParticipants(io, normalizedRoomId);
+    });
+
+    socket.on("whiteboard:join", async ({ roomId }, ack) => {
+      try {
+        const normalizedRoomId = String(roomId || socket.data.roomId || "").toUpperCase();
+        const users = rooms.get(normalizedRoomId);
+        const user = users?.get(socket.id);
+        if (!user) {
+          ack?.({ ok: false, error: "Not in room" });
+          return;
+        }
+
+        const board = await Board.findOneAndUpdate(
+          { roomId: normalizedRoomId },
+          { $setOnInsert: { roomId: normalizedRoomId, elements: [], background: "#0f172a", version: 0 } },
+          { new: true, upsert: true }
+        ).lean();
+
+        ack?.({
+          ok: true,
+          board: {
+            roomId: normalizedRoomId,
+            elements: board.elements || [],
+            background: board.background || "#0f172a",
+            version: board.version || 0
+          }
+        });
+      } catch (error) {
+        ack?.({ ok: false, error: "Unable to load whiteboard" });
+      }
+    });
+
+    socket.on("whiteboard:update", async ({ roomId, board }, ack) => {
+      try {
+        const normalizedRoomId = String(roomId || socket.data.roomId || "").toUpperCase();
+        const users = rooms.get(normalizedRoomId);
+        const user = users?.get(socket.id);
+        if (!user) {
+          ack?.({ ok: false, error: "Not in room" });
+          return;
+        }
+
+        const cleanState = cleanBoardState(board);
+        const existing = await Board.findOne({ roomId: normalizedRoomId }).lean();
+        const existingElements = existing?.elements || [];
+        const nextElements =
+          cleanState.elements.length >= existingElements.length
+            ? [
+                ...new Map(
+                  [...existingElements, ...cleanState.elements].map((element) => [element.id, element])
+                ).values()
+              ].slice(-1200)
+            : cleanState.elements;
+        const saved = await Board.findOneAndUpdate(
+          { roomId: normalizedRoomId },
+          {
+            $set: {
+              elements: nextElements,
+              background: cleanState.background
+            },
+            $inc: { version: 1 }
+          },
+          { new: true, upsert: true }
+        ).lean();
+
+        const payload = {
+          roomId: normalizedRoomId,
+          elements: saved.elements || [],
+          background: saved.background || "#0f172a",
+          version: saved.version || 0,
+          updatedBy: socket.id
+        };
+
+        socket.to(normalizedRoomId).emit("whiteboard:update", payload);
+        ack?.({ ok: true, board: payload });
+        touchRoom(normalizedRoomId, users.size).catch(() => {});
+      } catch (error) {
+        ack?.({ ok: false, error: "Whiteboard save failed" });
+      }
+    });
+
+    socket.on("whiteboard:cursor", ({ roomId, cursor }) => {
+      const normalizedRoomId = String(roomId || socket.data.roomId || "").toUpperCase();
+      const user = rooms.get(normalizedRoomId)?.get(socket.id);
+      if (!user) return;
+      socket.to(normalizedRoomId).emit("whiteboard:cursor", {
+        id: socket.id,
+        username: user.username,
+        color: user.cursorColor,
+        x: Number(cursor?.x) || 0,
+        y: Number(cursor?.y) || 0
+      });
+    });
+
+    socket.on("whiteboard:selection", ({ roomId, selectedIds }) => {
+      const normalizedRoomId = String(roomId || socket.data.roomId || "").toUpperCase();
+      const user = rooms.get(normalizedRoomId)?.get(socket.id);
+      if (!user) return;
+      socket.to(normalizedRoomId).emit("whiteboard:selection", {
+        id: socket.id,
+        username: user.username,
+        color: user.cursorColor,
+        selectedIds: Array.isArray(selectedIds) ? selectedIds.map((id) => cleanText(id, 80)).slice(0, 20) : []
+      });
     });
 
     socket.on("room:notice", async ({ roomId, notice }) => {
