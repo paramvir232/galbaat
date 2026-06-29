@@ -7,6 +7,8 @@ import {
   Eraser,
   Hand,
   Highlighter,
+  Mic,
+  MicOff,
   Minus,
   MousePointer2,
   MoveRight,
@@ -21,6 +23,8 @@ import {
   Trash2,
   Type,
   Undo2,
+  Users,
+  Volume2,
   X
 } from "lucide-react";
 
@@ -90,6 +94,66 @@ function resizeElement(element, point) {
   return { ...element, width: point.x - element.x, height: point.y - element.y };
 }
 
+function selectionHandles(element) {
+  const bounds = elementBounds(element);
+  const cx = bounds.x + bounds.width / 2;
+  const cy = bounds.y + bounds.height / 2;
+  return [
+    { id: "nw", x: bounds.x, y: bounds.y },
+    { id: "n", x: cx, y: bounds.y },
+    { id: "ne", x: bounds.x + bounds.width, y: bounds.y },
+    { id: "e", x: bounds.x + bounds.width, y: cy },
+    { id: "se", x: bounds.x + bounds.width, y: bounds.y + bounds.height },
+    { id: "s", x: cx, y: bounds.y + bounds.height },
+    { id: "sw", x: bounds.x, y: bounds.y + bounds.height },
+    { id: "w", x: bounds.x, y: cy },
+    { id: "rotate", x: cx, y: bounds.y - 34 }
+  ];
+}
+
+function nextBoundsForHandle(bounds, handle, point) {
+  let left = bounds.x;
+  let right = bounds.x + bounds.width;
+  let top = bounds.y;
+  let bottom = bounds.y + bounds.height;
+
+  if (handle.includes("w")) left = point.x;
+  if (handle.includes("e")) right = point.x;
+  if (handle.includes("n")) top = point.y;
+  if (handle.includes("s")) bottom = point.y;
+
+  if (Math.abs(right - left) < 8) right = left + Math.sign(right - left || 1) * 8;
+  if (Math.abs(bottom - top) < 8) bottom = top + Math.sign(bottom - top || 1) * 8;
+
+  return {
+    x: Math.min(left, right),
+    y: Math.min(top, bottom),
+    width: Math.abs(right - left),
+    height: Math.abs(bottom - top)
+  };
+}
+
+function resizeFromBounds(element, startBounds, nextBounds) {
+  if (element.points?.length) {
+    const scaleX = nextBounds.width / Math.max(1, startBounds.width);
+    const scaleY = nextBounds.height / Math.max(1, startBounds.height);
+    return {
+      ...element,
+      points: element.points.map((point) => [
+        nextBounds.x + (point[0] - startBounds.x) * scaleX,
+        nextBounds.y + (point[1] - startBounds.y) * scaleY
+      ])
+    };
+  }
+  return {
+    ...element,
+    x: nextBounds.x,
+    y: nextBounds.y,
+    width: nextBounds.width,
+    height: nextBounds.height
+  };
+}
+
 function normalizeAngle(angle) {
   return ((angle % 360) + 360) % 360;
 }
@@ -108,7 +172,7 @@ function arrowPoints(element) {
   ];
 }
 
-export default function Whiteboard({ open, roomId, socket, currentUser, onClose }) {
+export default function Whiteboard({ open, roomId, socket, currentUser, participants = [], peerVolumes = {}, onPeerVolumeChange, onSelfMute, onClose }) {
   const stageRef = useRef(null);
   const elementsRef = useRef([]);
   const backgroundRef = useRef("#0f172a");
@@ -121,6 +185,7 @@ export default function Whiteboard({ open, roomId, socket, currentUser, onClose 
   const [selectedIds, setSelectedIds] = useState([]);
   const [remoteSelections, setRemoteSelections] = useState({});
   const [remoteCursors, setRemoteCursors] = useState({});
+  const [boardUsers, setBoardUsers] = useState([]);
   const [history, setHistory] = useState([]);
   const [redoStack, setRedoStack] = useState([]);
   const [stroke, setStroke] = useState("#f8fafc");
@@ -173,6 +238,7 @@ export default function Whiteboard({ open, roomId, socket, currentUser, onClose 
       elementsRef.current = board.elements || [];
       setBackground(board.background || "#0f172a");
       backgroundRef.current = board.background || "#0f172a";
+      setBoardUsers(board.users || []);
       setHistory([]);
       setRedoStack([]);
     });
@@ -189,15 +255,35 @@ export default function Whiteboard({ open, roomId, socket, currentUser, onClose 
     function onSelection(selection) {
       setRemoteSelections((current) => ({ ...current, [selection.id]: selection }));
     }
+    function onCursorLeft({ id }) {
+      setRemoteCursors((current) => {
+        const next = { ...current };
+        delete next[id];
+        return next;
+      });
+      setRemoteSelections((current) => {
+        const next = { ...current };
+        delete next[id];
+        return next;
+      });
+    }
+    function onBoardUsers(users) {
+      setBoardUsers(users || []);
+    }
 
     socket.on("whiteboard:update", onBoardUpdate);
     socket.on("whiteboard:cursor", onCursor);
+    socket.on("whiteboard:cursor:left", onCursorLeft);
     socket.on("whiteboard:selection", onSelection);
+    socket.on("whiteboard:users", onBoardUsers);
     return () => {
       window.clearTimeout(saveTimerRef.current);
+      socket.emit("whiteboard:leave", { roomId });
       socket.off("whiteboard:update", onBoardUpdate);
       socket.off("whiteboard:cursor", onCursor);
+      socket.off("whiteboard:cursor:left", onCursorLeft);
       socket.off("whiteboard:selection", onSelection);
+      socket.off("whiteboard:users", onBoardUsers);
     };
   }, [open, roomId, socket]);
 
@@ -221,6 +307,22 @@ export default function Whiteboard({ open, roomId, socket, currentUser, onClose 
     return null;
   }
 
+  function hitSelectionHandle(point) {
+    if (!selectedElement) return null;
+    const radius = 13 / view.scale;
+    return selectionHandles(selectedElement).find((handle) => Math.hypot(point.x - handle.x, point.y - handle.y) <= radius);
+  }
+
+  function eraseAt(point) {
+    const hit = hitTest(point);
+    if (!hit) return false;
+    const next = elementsRef.current.filter((element) => element.id !== hit.id);
+    setElements(next);
+    elementsRef.current = next;
+    emitBoard(next);
+    return true;
+  }
+
   function beginPointer(event) {
     if (event.button !== 0) return;
     event.currentTarget.setPointerCapture(event.pointerId);
@@ -232,6 +334,23 @@ export default function Whiteboard({ open, roomId, socket, currentUser, onClose 
     }
 
     if (tool === "select") {
+      const handle = hitSelectionHandle(point);
+      if (handle && selectedElement) {
+        const bounds = elementBounds(selectedElement);
+        dragRef.current = {
+          mode: handle.id === "rotate" ? "rotate" : "resize",
+          handle: handle.id,
+          id: selectedElement.id,
+          start: point,
+          startBounds: bounds,
+          startCenter: { x: bounds.x + bounds.width / 2, y: bounds.y + bounds.height / 2 },
+          startAngle: Math.atan2(point.y - (bounds.y + bounds.height / 2), point.x - (bounds.x + bounds.width / 2)),
+          startRotation: selectedElement.rotation || 0,
+          previous: cloneElements(elementsRef.current)
+        };
+        return;
+      }
+
       const hit = hitTest(point);
       if (!hit) {
         updateSelection([]);
@@ -239,15 +358,13 @@ export default function Whiteboard({ open, roomId, socket, currentUser, onClose 
         return;
       }
       updateSelection([hit.id]);
-      const bounds = elementBounds(hit);
-      const isResize = Math.abs(point.x - (bounds.x + bounds.width)) < 14 && Math.abs(point.y - (bounds.y + bounds.height)) < 14;
-      dragRef.current = { mode: isResize ? "resize" : "move", id: hit.id, start: point, previous: cloneElements(elementsRef.current) };
+      dragRef.current = { mode: "move", id: hit.id, start: point, previous: cloneElements(elementsRef.current) };
       return;
     }
 
     if (tool === "eraser") {
-      const hit = hitTest(point);
-      if (hit) commitElements(elementsRef.current.filter((element) => element.id !== hit.id));
+      dragRef.current = { mode: "erase", previous: cloneElements(elementsRef.current) };
+      eraseAt(point);
       return;
     }
 
@@ -309,10 +426,19 @@ export default function Whiteboard({ open, roomId, socket, currentUser, onClose 
       return;
     }
 
+    if (drag.mode === "erase") {
+      eraseAt(point);
+      return;
+    }
+
     const next = elementsRef.current.map((element) => {
       if (element.id !== drag.id) return element;
       if (drag.mode === "move") return moveElement(element, point.x - drag.start.x, point.y - drag.start.y);
-      if (drag.mode === "resize") return resizeElement(element, point);
+      if (drag.mode === "resize") return resizeFromBounds(element, drag.startBounds, nextBoundsForHandle(drag.startBounds, drag.handle, point));
+      if (drag.mode === "rotate") {
+        const angle = Math.atan2(point.y - drag.startCenter.y, point.x - drag.startCenter.x);
+        return { ...element, rotation: normalizeAngle(drag.startRotation + ((angle - drag.startAngle) * 180) / Math.PI) };
+      }
       if (drag.mode === "draw" && element.points?.length) return { ...element, points: [...element.points, [point.x, point.y]] };
       if (drag.mode === "draw") return { ...element, width: point.x - drag.start.x, height: point.y - drag.start.y };
       return element;
@@ -459,6 +585,8 @@ export default function Whiteboard({ open, roomId, socket, currentUser, onClose 
   }
 
   if (!open) return null;
+  const boardVoiceUsers = boardUsers.map((user) => participants.find((participant) => participant.id === user.id) || user);
+  const currentBoardUser = boardVoiceUsers.find((user) => user.id === currentUser?.id) || currentUser;
 
   return (
     <div className="fixed inset-0 z-50 flex flex-col bg-ink text-slate-100">
@@ -498,40 +626,128 @@ export default function Whiteboard({ open, roomId, socket, currentUser, onClose 
           <button type="button" onClick={rotateSelected} title="Rotate (R)" className="grid h-9 w-9 place-items-center rounded-md text-slate-300 hover:bg-white/10"><RotateCw className="h-4 w-4" /></button>
         </div>
 
-        <div className="absolute bottom-3 left-1/2 z-30 flex max-w-[calc(100%-24px)] -translate-x-1/2 flex-wrap items-center justify-center gap-2 rounded-lg border border-line bg-panel/95 p-2 shadow-2xl">
-          <label className="inline-flex items-center gap-2 text-xs text-slate-300" title="Stroke color">
-            <Palette className="h-4 w-4" />
-            <input type="color" value={stroke} onChange={(event) => setStroke(event.target.value)} className="h-7 w-8 rounded border border-line bg-transparent" />
-          </label>
-          <label className="inline-flex items-center gap-2 text-xs text-slate-300" title="Fill color">
-            <PaintBucket className="h-4 w-4" />
-            <input type="color" value={fill === "transparent" ? "#111827" : fill} onChange={(event) => setFill(event.target.value)} className="h-7 w-8 rounded border border-line bg-transparent" />
-          </label>
-          <button type="button" onClick={() => setFill("transparent")} className="h-8 rounded-md border border-line px-2 text-xs text-slate-300 hover:bg-white/10">No fill</button>
-          <label className="inline-flex items-center gap-2 text-xs text-slate-300">
-            Width
-            <input type="range" min="1" max="24" value={strokeWidth} onChange={(event) => setStrokeWidth(Number(event.target.value))} className="w-20 accent-mint" />
-          </label>
-          <label className="inline-flex items-center gap-2 text-xs text-slate-300">
-            Opacity
-            <input type="range" min="0.1" max="1" step="0.05" value={opacity} onChange={(event) => setOpacity(Number(event.target.value))} className="w-20 accent-mint" />
-          </label>
-          <label className="inline-flex items-center gap-2 text-xs text-slate-300">
-            Bg
-            <input
-              type="color"
-              value={background}
-              onChange={(event) => {
-                setBackground(event.target.value);
-                backgroundRef.current = event.target.value;
-                emitBoard(elementsRef.current, event.target.value);
-              }}
-              className="h-7 w-8 rounded border border-line bg-transparent"
-            />
-          </label>
-          <button type="button" onClick={() => setZoom(view.scale - 0.1)} className="grid h-8 w-8 place-items-center rounded-md border border-line text-slate-300 hover:bg-white/10"><Minus className="h-4 w-4" /></button>
-          <span className="w-12 text-center text-xs text-slate-300">{Math.round(view.scale * 100)}%</span>
-          <button type="button" onClick={() => setZoom(view.scale + 0.1)} className="grid h-8 w-8 place-items-center rounded-md border border-line text-slate-300 hover:bg-white/10"><Plus className="h-4 w-4" /></button>
+        <div className="absolute bottom-3 left-3 right-3 z-30 max-h-[48%] overflow-y-auto rounded-xl border border-line bg-panel/95 p-3 shadow-2xl backdrop-blur lg:bottom-3 lg:right-auto lg:top-16 lg:w-72">
+          <div className="space-y-4">
+            <section>
+              <div className="mb-2 flex items-center gap-2 text-xs font-bold uppercase tracking-wide text-slate-400">
+                <Palette className="h-4 w-4" />
+                Style
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <label className="rounded-lg border border-line bg-ink/50 p-2 text-xs text-slate-300">
+                  Stroke
+                  <input type="color" value={stroke} onChange={(event) => setStroke(event.target.value)} className="mt-2 h-9 w-full cursor-pointer rounded-md border border-line bg-transparent" />
+                </label>
+                <label className="rounded-lg border border-line bg-ink/50 p-2 text-xs text-slate-300">
+                  Fill
+                  <input type="color" value={fill === "transparent" ? "#111827" : fill} onChange={(event) => setFill(event.target.value)} className="mt-2 h-9 w-full cursor-pointer rounded-md border border-line bg-transparent" />
+                </label>
+              </div>
+              <div className="mt-2 flex flex-wrap gap-1.5">
+                {COLORS.map((color) => (
+                  <button
+                    key={color}
+                    type="button"
+                    onClick={() => setStroke(color)}
+                    title={color}
+                    className={`h-7 w-7 rounded-full border ${stroke === color ? "border-mint ring-2 ring-mint/30" : "border-white/20"}`}
+                    style={{ background: color }}
+                  />
+                ))}
+              </div>
+              <button type="button" onClick={() => setFill("transparent")} className="mt-2 inline-flex min-h-9 w-full items-center justify-center gap-2 rounded-lg border border-line bg-white/[0.04] text-xs font-semibold text-slate-200 hover:bg-white/10">
+                <PaintBucket className="h-4 w-4" />
+                No fill
+              </button>
+              <label className="mt-3 block text-xs font-semibold text-slate-300">
+                Width <span className="float-right text-slate-400">{strokeWidth}px</span>
+                <input type="range" min="1" max="24" value={strokeWidth} onChange={(event) => setStrokeWidth(Number(event.target.value))} className="mt-2 w-full accent-mint" />
+              </label>
+              <label className="mt-3 block text-xs font-semibold text-slate-300">
+                Opacity <span className="float-right text-slate-400">{Math.round(opacity * 100)}%</span>
+                <input type="range" min="0.1" max="1" step="0.05" value={opacity} onChange={(event) => setOpacity(Number(event.target.value))} className="mt-2 w-full accent-mint" />
+              </label>
+              <label className="mt-3 flex items-center justify-between gap-3 rounded-lg border border-line bg-ink/50 p-2 text-xs font-semibold text-slate-300">
+                Background
+                <input
+                  type="color"
+                  value={background}
+                  onChange={(event) => {
+                    setBackground(event.target.value);
+                    backgroundRef.current = event.target.value;
+                    emitBoard(elementsRef.current, event.target.value);
+                  }}
+                  className="h-8 w-12 cursor-pointer rounded border border-line bg-transparent"
+                />
+              </label>
+            </section>
+
+            <section>
+              <div className="mb-2 flex items-center gap-2 text-xs font-bold uppercase tracking-wide text-slate-400">
+                <Users className="h-4 w-4" />
+                On board
+              </div>
+              <div className="space-y-2">
+                {boardVoiceUsers.length ? boardVoiceUsers.map((user) => (
+                  <div key={user.id} className="flex items-center gap-2 rounded-lg border border-line bg-ink/50 p-2">
+                    <span className="h-2.5 w-2.5 rounded-full" style={{ background: user.cursorColor || user.color || "#29d3a7" }} />
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm font-semibold text-slate-100">{user.username}</p>
+                      <p className="text-xs text-slate-500">{user.id === currentUser?.id ? "You" : user.speaking ? "Speaking" : "Connected"}</p>
+                    </div>
+                    {user.muted ? <MicOff className="h-4 w-4 text-amberglow" /> : <Mic className="h-4 w-4 text-slate-400" />}
+                  </div>
+                )) : (
+                  <p className="rounded-lg border border-dashed border-line px-3 py-2 text-xs text-slate-500">No one else is on the board yet.</p>
+                )}
+              </div>
+            </section>
+
+            <section>
+              <div className="mb-2 flex items-center gap-2 text-xs font-bold uppercase tracking-wide text-slate-400">
+                <Volume2 className="h-4 w-4" />
+                Voice control
+              </div>
+              <button
+                type="button"
+                onClick={() => onSelfMute?.(!currentBoardUser?.selfMuted)}
+                disabled={Boolean(currentBoardUser?.hostMuted)}
+                className={`mb-2 inline-flex min-h-10 w-full items-center justify-center gap-2 rounded-lg border px-3 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-50 ${
+                  currentBoardUser?.selfMuted || currentBoardUser?.hostMuted ? "border-amberglow/40 bg-amberglow/10 text-amberglow" : "border-line bg-white/[0.04] text-slate-200 hover:bg-white/10"
+                }`}
+              >
+                {currentBoardUser?.selfMuted || currentBoardUser?.hostMuted ? <MicOff className="h-4 w-4" /> : <Mic className="h-4 w-4" />}
+                {currentBoardUser?.hostMuted ? "Admin muted" : currentBoardUser?.selfMuted ? "Unmute mic" : "Mute mic"}
+              </button>
+              <div className="space-y-2">
+                {boardVoiceUsers.filter((user) => user.id !== currentUser?.id).map((user) => (
+                  <label key={user.id} className="block rounded-lg border border-line bg-ink/50 p-2 text-xs text-slate-300">
+                    <span className="mb-1 flex items-center justify-between gap-2">
+                      <span className="truncate font-semibold text-slate-100">{user.username}</span>
+                      <span>{peerVolumes[user.id] ?? 100}%</span>
+                    </span>
+                    <input
+                      type="range"
+                      min="0"
+                      max="150"
+                      value={peerVolumes[user.id] ?? 100}
+                      onChange={(event) => onPeerVolumeChange?.(user.id, Number(event.target.value))}
+                      className="w-full accent-mint"
+                    />
+                  </label>
+                ))}
+              </div>
+            </section>
+
+            <section>
+              <div className="mb-2 text-xs font-bold uppercase tracking-wide text-slate-400">Zoom</div>
+              <div className="flex items-center gap-2">
+                <button type="button" onClick={() => setZoom(view.scale - 0.1)} className="grid h-9 w-9 place-items-center rounded-lg border border-line bg-white/[0.04] text-slate-300 hover:bg-white/10"><Minus className="h-4 w-4" /></button>
+                <span className="flex-1 rounded-lg border border-line bg-ink/50 py-2 text-center text-sm font-semibold text-slate-200">{Math.round(view.scale * 100)}%</span>
+                <button type="button" onClick={() => setZoom(view.scale + 0.1)} className="grid h-9 w-9 place-items-center rounded-lg border border-line bg-white/[0.04] text-slate-300 hover:bg-white/10"><Plus className="h-4 w-4" /></button>
+              </div>
+            </section>
+          </div>
         </div>
 
         <svg
@@ -554,10 +770,18 @@ export default function Whiteboard({ open, roomId, socket, currentUser, onClose 
               <g>
                 {(() => {
                   const bounds = elementBounds(selectedElement);
+                  const handles = selectionHandles(selectedElement);
                   return (
                     <>
                       <rect x={bounds.x - 6} y={bounds.y - 6} width={bounds.width + 12} height={bounds.height + 12} fill="none" stroke="#29d3a7" strokeDasharray="8 6" vectorEffect="non-scaling-stroke" />
-                      <rect x={bounds.x + bounds.width - 5} y={bounds.y + bounds.height - 5} width="10" height="10" rx="2" fill="#29d3a7" vectorEffect="non-scaling-stroke" />
+                      <line x1={bounds.x + bounds.width / 2} y1={bounds.y - 6} x2={bounds.x + bounds.width / 2} y2={bounds.y - 34} stroke="#29d3a7" strokeDasharray="4 4" vectorEffect="non-scaling-stroke" />
+                      {handles.map((handle) =>
+                        handle.id === "rotate" ? (
+                          <circle key={handle.id} cx={handle.x} cy={handle.y} r="8" fill="#0f172a" stroke="#29d3a7" strokeWidth="2" vectorEffect="non-scaling-stroke" />
+                        ) : (
+                          <rect key={handle.id} x={handle.x - 5} y={handle.y - 5} width="10" height="10" rx="2" fill="#0f172a" stroke="#29d3a7" strokeWidth="2" vectorEffect="non-scaling-stroke" />
+                        )
+                      )}
                     </>
                   );
                 })()}

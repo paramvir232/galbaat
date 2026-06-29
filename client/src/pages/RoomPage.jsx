@@ -894,6 +894,10 @@ export default function RoomPage() {
         roomId={roomId}
         socket={socket}
         currentUser={self}
+        participants={participants}
+        peerVolumes={peerVolumes}
+        onPeerVolumeChange={changePeerVolume}
+        onSelfMute={selfMute}
         onClose={() => setWhiteboardOpen(false)}
       />
 

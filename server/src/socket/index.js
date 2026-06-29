@@ -8,6 +8,7 @@ import { cleanText, cleanUsername } from "../utils/sanitize.js";
 
 const rooms = new Map();
 const emptyRoomTimers = new Map();
+const boardUsers = new Map();
 
 function roomUsers(roomId) {
   if (!rooms.has(roomId)) rooms.set(roomId, new Map());
@@ -18,6 +19,7 @@ function publicUser(user) {
   return {
     id: user.id,
     username: user.username,
+    cursorColor: user.cursorColor,
     host: user.host,
     speaking: user.speaking,
     muted: Boolean(user.selfMuted || user.hostMuted),
@@ -34,6 +36,16 @@ function emitParticipants(io, roomId) {
   const participants = [...roomUsers(roomId).values()].map(publicUser);
   io.to(roomId).emit("participants:update", participants);
   return participants;
+}
+
+function boardParticipants(roomId) {
+  const users = rooms.get(roomId);
+  const ids = boardUsers.get(roomId) || new Set();
+  return [...ids].map((id) => users?.get(id)).filter(Boolean).map(publicUser);
+}
+
+function emitBoardUsers(io, roomId) {
+  io.to(roomId).emit("whiteboard:users", boardParticipants(roomId));
 }
 
 function reactionCounts(reactions = {}) {
@@ -124,6 +136,8 @@ async function leaveCurrentRoom(io, socket) {
   const users = rooms.get(currentRoomId);
   const user = users.get(socket.id);
   users.delete(socket.id);
+  boardUsers.get(currentRoomId)?.delete(socket.id);
+  emitBoardUsers(io, currentRoomId);
   socket.leave(currentRoomId);
 
   socket.to(currentRoomId).emit("participant:left", {
@@ -423,6 +437,8 @@ export function registerSocketHandlers(io) {
           return;
         }
 
+        if (!boardUsers.has(normalizedRoomId)) boardUsers.set(normalizedRoomId, new Set());
+        boardUsers.get(normalizedRoomId).add(socket.id);
         const board = await Board.findOneAndUpdate(
           { roomId: normalizedRoomId },
           { $setOnInsert: { roomId: normalizedRoomId, elements: [], background: "#0f172a", version: 0 } },
@@ -435,12 +451,22 @@ export function registerSocketHandlers(io) {
             roomId: normalizedRoomId,
             elements: board.elements || [],
             background: board.background || "#0f172a",
-            version: board.version || 0
+            version: board.version || 0,
+            users: boardParticipants(normalizedRoomId)
           }
         });
+        emitBoardUsers(io, normalizedRoomId);
       } catch (error) {
         ack?.({ ok: false, error: "Unable to load whiteboard" });
       }
+    });
+
+    socket.on("whiteboard:leave", ({ roomId }) => {
+      const normalizedRoomId = String(roomId || socket.data.roomId || "").toUpperCase();
+      boardUsers.get(normalizedRoomId)?.delete(socket.id);
+      emitBoardUsers(io, normalizedRoomId);
+      socket.to(normalizedRoomId).emit("whiteboard:cursor:left", { id: socket.id });
+      socket.to(normalizedRoomId).emit("whiteboard:selection", { id: socket.id, selectedIds: [] });
     });
 
     socket.on("whiteboard:update", async ({ roomId, board }, ack) => {
