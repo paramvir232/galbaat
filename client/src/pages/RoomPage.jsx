@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { motion } from "framer-motion";
-import { ArrowLeft, FileText, Hand, Hash, Loader2, Lock, Menu, PanelLeftOpen, Radio, ScreenShare, ScreenShareOff, Unlock, Video, VideoOff, Wifi, WifiOff, X } from "lucide-react";
+import { ArrowLeft, FileText, Hand, Hash, Loader2, Lock, Menu, PanelLeftOpen, Radio, ScreenShare, ScreenShareOff, Settings, Unlock, Video, VideoOff, Wifi, WifiOff, X } from "lucide-react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import ChatPanel from "../components/ChatPanel.jsx";
 import ParticipantList from "../components/ParticipantList.jsx";
@@ -9,7 +9,7 @@ import ShareRoom from "../components/ShareRoom.jsx";
 import StatusPill from "../components/StatusPill.jsx";
 import VideoGrid from "../components/VideoGrid.jsx";
 import { getMessages, getRoom, uploadRoomFile } from "../lib/api.js";
-import { getGuestName } from "../lib/guest.js";
+import { getGuestName, setGuestName } from "../lib/guest.js";
 import { useSocket } from "../hooks/useSocket.js";
 import { useWebRtcRoom } from "../hooks/useWebRtcRoom.js";
 
@@ -59,6 +59,9 @@ export default function RoomPage() {
   const [participantsCollapsed, setParticipantsCollapsed] = useState(false);
   const [chatWidth, setChatWidth] = useState(360);
   const [desktopLayout, setDesktopLayout] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [settingsName, setSettingsName] = useState("");
+  const [settingsError, setSettingsError] = useState("");
   const speakingRef = useRef(false);
   const micLockedRef = useRef(false);
   const videoEnabledRef = useRef(false);
@@ -66,6 +69,7 @@ export default function RoomPage() {
   const wasScreenSharingRef = useRef(false);
   const participantHandsRef = useRef(new Map());
   const chatResizeRef = useRef(null);
+  const optimisticUploadUrlsRef = useRef(new Map());
 
   const getMaxChatWidth = useCallback(() => {
     if (typeof window === "undefined") return MAX_CHAT_WIDTH;
@@ -76,6 +80,18 @@ export default function RoomPage() {
   useEffect(() => {
     videoEnabledRef.current = videoEnabled;
   }, [videoEnabled]);
+
+  useEffect(() => {
+    const optimisticUploadUrls = optimisticUploadUrlsRef.current;
+    return () => {
+      optimisticUploadUrls.forEach((url) => window.URL.revokeObjectURL(url));
+      optimisticUploadUrls.clear();
+    };
+  }, []);
+
+  useEffect(() => {
+    setSettingsName(self?.username || getGuestName());
+  }, [self?.username]);
 
   useEffect(() => {
     const media = window.matchMedia("(min-width: 1024px)");
@@ -265,7 +281,19 @@ export default function RoomPage() {
       ]);
     }
     function onChat(message) {
-      setMessages((current) => [...current, message]);
+      setMessages((current) => {
+        if (!message.clientUploadId) return [...current, message];
+        const optimisticUrl = optimisticUploadUrlsRef.current.get(message.clientUploadId);
+        if (optimisticUrl) {
+          window.URL.revokeObjectURL(optimisticUrl);
+          optimisticUploadUrlsRef.current.delete(message.clientUploadId);
+        }
+        const optimisticIndex = current.findIndex((item) => item.clientUploadId === message.clientUploadId);
+        if (optimisticIndex === -1) return [...current, message];
+        const next = [...current];
+        next[optimisticIndex] = message;
+        return next;
+      });
       if (mobilePanel !== "chat") setUnreadCount((count) => count + 1);
     }
     function onReaction({ messageId, reactions }) {
@@ -432,8 +460,32 @@ export default function RoomPage() {
 
   function selfMute(nextMuted) {
     if (nextMuted) stopTalking(true);
-    setMuted(Boolean(nextMuted));
+    setMuted(Boolean(nextMuted || self?.hostMuted));
+    setSelf((current) =>
+      current
+        ? {
+            ...current,
+            selfMuted: Boolean(nextMuted),
+            muted: Boolean(nextMuted || current.hostMuted)
+          }
+        : current
+    );
     socket.emit("participant:mute", { roomId, muted: nextMuted });
+  }
+
+  function saveDisplayName(event) {
+    event.preventDefault();
+    const nextName = setGuestName(settingsName);
+    setSettingsName(nextName);
+    setSettingsError("");
+    socket.emit("participant:rename", { roomId, username: nextName }, (ack) => {
+      if (!ack?.ok) {
+        setSettingsError(ack?.error || "Unable to update name");
+        return;
+      }
+      setSelf(ack.user);
+      setSettingsOpen(false);
+    });
   }
 
   function kickParticipant(targetId) {
@@ -462,11 +514,57 @@ export default function RoomPage() {
   }
 
   async function uploadFile(file, options = {}) {
+    const clientUploadId = options.clientUploadId || (options.optimistic ? `upload-${Date.now()}-${Math.random().toString(36).slice(2)}` : undefined);
+    let optimisticUrl = null;
+    if (options.optimistic && clientUploadId) {
+      optimisticUrl = window.URL.createObjectURL(file);
+      optimisticUploadUrlsRef.current.set(clientUploadId, optimisticUrl);
+      setMessages((current) => [
+        ...current,
+        {
+          id: clientUploadId,
+          clientUploadId,
+          optimistic: true,
+          roomId,
+          username: self?.username || getGuestName(),
+          message: options.message || "",
+          attachments: [
+            {
+              id: clientUploadId,
+              originalName: file.name,
+              mimeType: file.type,
+              size: file.size,
+              previewUrl: optimisticUrl,
+              downloadUrl: optimisticUrl
+            }
+          ],
+          reactions: {},
+          timestamp: new Date().toISOString()
+        }
+      ]);
+    }
+
     setFileUploading(true);
     setError("");
     try {
-      await uploadRoomFile(roomId, file, getGuestName(), { ...options, chatOnly: true });
+      const payload = await uploadRoomFile(roomId, file, getGuestName(), { ...options, clientUploadId, chatOnly: true });
+      if (payload.message?.clientUploadId) {
+        setMessages((current) => current.map((message) => (message.clientUploadId === payload.message.clientUploadId ? payload.message : message)));
+        const savedUrl = optimisticUploadUrlsRef.current.get(payload.message.clientUploadId);
+        if (savedUrl) {
+          window.URL.revokeObjectURL(savedUrl);
+          optimisticUploadUrlsRef.current.delete(payload.message.clientUploadId);
+        }
+      }
     } catch (err) {
+      if (clientUploadId) {
+        const savedUrl = optimisticUploadUrlsRef.current.get(clientUploadId);
+        if (savedUrl) {
+          window.URL.revokeObjectURL(savedUrl);
+          optimisticUploadUrlsRef.current.delete(clientUploadId);
+        }
+        setMessages((current) => current.filter((message) => message.clientUploadId !== clientUploadId));
+      }
       setError(err.message || "Upload failed");
     } finally {
       setFileUploading(false);
@@ -589,6 +687,18 @@ export default function RoomPage() {
           )}
           <button
             type="button"
+            onClick={() => {
+              setSettingsName(self?.username || getGuestName());
+              setSettingsError("");
+              setSettingsOpen(true);
+            }}
+            title="Settings"
+            className="grid h-11 w-11 place-items-center rounded-md border border-line bg-white/[0.05] text-slate-200 hover:bg-white/10 sm:h-10 sm:w-10"
+          >
+            <Settings className="h-4 w-4" />
+          </button>
+          <button
+            type="button"
             onClick={() => setMobilePanel((panel) => (panel === "room" ? "chat" : "room"))}
             className="grid h-11 w-11 place-items-center rounded-md border border-line bg-white/[0.05] md:hidden"
           >
@@ -667,10 +777,13 @@ export default function RoomPage() {
             compact={hasVideo}
             locked={micLocked}
             muted={muted}
+            selfMuted={Boolean(self?.selfMuted || (muted && !self?.hostMuted))}
+            hostMuted={Boolean(self?.hostMuted)}
             disabled={!connected}
             onStart={startTalking}
             onStop={stopTalking}
             onToggleLock={toggleMicLock}
+            onToggleMute={selfMute}
           />
 
           <div className="grid w-full grid-cols-2 gap-2 sm:flex sm:w-auto sm:flex-wrap sm:items-center sm:justify-center sm:gap-3">
@@ -721,6 +834,54 @@ export default function RoomPage() {
           />
         </div>
       </section>
+
+      {settingsOpen && (
+        <div className="fixed inset-0 z-50 grid place-items-center bg-ink/70 p-4 backdrop-blur-sm">
+          <form onSubmit={saveDisplayName} className="w-full max-w-sm rounded-lg border border-line bg-panel p-4 shadow-2xl">
+            <div className="mb-4 flex items-center justify-between gap-3">
+              <div>
+                <h2 className="text-base font-bold text-slate-100">Settings</h2>
+                <p className="text-xs text-slate-400">Change your display name</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setSettingsOpen(false)}
+                className="grid h-9 w-9 place-items-center rounded-md border border-line bg-white/[0.04] text-slate-300 hover:bg-white/10"
+                aria-label="Close settings"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <label className="block text-sm font-semibold text-slate-200" htmlFor="display-name">
+              Display name
+            </label>
+            <input
+              id="display-name"
+              value={settingsName}
+              onChange={(event) => setSettingsName(event.target.value)}
+              maxLength={24}
+              autoFocus
+              className="mt-2 w-full rounded-md border border-line bg-ink/70 px-3 py-2 text-sm text-slate-100 outline-none transition placeholder:text-slate-500 focus:border-mint/70"
+              placeholder="Your name"
+            />
+            {settingsError && <p className="mt-2 text-xs text-amberglow">{settingsError}</p>}
+
+            <div className="mt-5 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setSettingsOpen(false)}
+                className="min-h-10 rounded-md border border-line bg-white/[0.04] px-4 text-sm font-medium text-slate-200 hover:bg-white/10"
+              >
+                Cancel
+              </button>
+              <button type="submit" className="min-h-10 rounded-md bg-mint px-4 text-sm font-bold text-ink hover:bg-mint/90">
+                Save
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
 
       <nav className="mt-1.5 grid shrink-0 grid-cols-3 gap-1.5 pb-[var(--safe-bottom)] sm:mt-2 sm:gap-2 lg:hidden">
         <button
