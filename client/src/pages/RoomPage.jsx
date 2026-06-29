@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { motion } from "framer-motion";
-import { ArrowLeft, FileText, Hand, Hash, Loader2, Lock, Menu, PanelLeftOpen, Radio, ScreenShare, ScreenShareOff, Settings, Unlock, Video, VideoOff, Wifi, WifiOff, X } from "lucide-react";
+import { ArrowLeft, FileText, Hand, Hash, Loader2, Lock, Menu, PanelLeftOpen, Pencil, ScreenShare, ScreenShareOff, Settings, Unlock, Video, VideoOff, Wifi, WifiOff, X } from "lucide-react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import ChatPanel from "../components/ChatPanel.jsx";
 import ParticipantList from "../components/ParticipantList.jsx";
@@ -8,6 +8,7 @@ import PushToTalk from "../components/PushToTalk.jsx";
 import ShareRoom from "../components/ShareRoom.jsx";
 import StatusPill from "../components/StatusPill.jsx";
 import VideoGrid from "../components/VideoGrid.jsx";
+import Whiteboard from "../components/Whiteboard.jsx";
 import { getMessages, getRoom, uploadRoomFile } from "../lib/api.js";
 import { getGuestName, setGuestName } from "../lib/guest.js";
 import { useSocket } from "../hooks/useSocket.js";
@@ -62,6 +63,7 @@ export default function RoomPage() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsName, setSettingsName] = useState("");
   const [settingsError, setSettingsError] = useState("");
+  const [whiteboardOpen, setWhiteboardOpen] = useState(false);
   const speakingRef = useRef(false);
   const micLockedRef = useRef(false);
   const videoEnabledRef = useRef(false);
@@ -740,10 +742,14 @@ export default function RoomPage() {
               {connected ? <Wifi className="h-4 w-4 text-mint" /> : <WifiOff className="h-4 w-4 text-amberglow" />}
               {participants.length} online
             </div>
-            <div className="inline-flex min-h-11 items-center justify-center gap-2 rounded-full border border-line bg-white/[0.04] px-3 py-2 text-xs text-slate-300 sm:min-h-0 sm:px-4 sm:text-sm">
-              <Radio className={`h-4 w-4 ${audioEnabled ? "text-mint" : "text-slate-500"}`} />
-              {audioEnabled ? "Broadcasting" : "Listening"}
-            </div>
+            <button
+              type="button"
+              onClick={() => setWhiteboardOpen(true)}
+              className="inline-flex min-h-11 items-center justify-center gap-2 rounded-full border border-line bg-white/[0.04] px-3 py-2 text-xs font-medium text-slate-300 transition hover:bg-white/10 sm:min-h-0 sm:px-4 sm:text-sm"
+            >
+              <Pencil className={`h-4 w-4 ${audioEnabled ? "text-mint" : "text-slate-400"}`} />
+              Whiteboard
+            </button>
             <button
               type="button"
               disabled={!connected || videoBusy}
@@ -882,6 +888,14 @@ export default function RoomPage() {
           </form>
         </div>
       )}
+
+      <Whiteboard
+        open={whiteboardOpen}
+        roomId={roomId}
+        socket={socket}
+        currentUser={self}
+        onClose={() => setWhiteboardOpen(false)}
+      />
 
       <nav className="mt-1.5 grid shrink-0 grid-cols-3 gap-1.5 pb-[var(--safe-bottom)] sm:mt-2 sm:gap-2 lg:hidden">
         <button
