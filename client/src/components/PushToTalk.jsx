@@ -1,8 +1,11 @@
 import { motion } from "framer-motion";
 import { Lock, Mic, MicOff, Radio, Unlock } from "lucide-react";
 
-export default function PushToTalk({ active, compact, locked, muted, disabled, onStart, onStop, onToggleLock }) {
+export default function PushToTalk({ active, compact, locked, muted, selfMuted, hostMuted, disabled, onStart, onStop, onToggleLock, onToggleMute }) {
   const lockDisabled = disabled || muted;
+  const muteDisabled = disabled || hostMuted;
+  const mutedLabel = hostMuted ? "Muted by Admin" : selfMuted ? "Mic Muted" : "Hold to Talk";
+  const mutedHint = hostMuted ? "Admin can unmute you" : selfMuted ? "Tap unmute to speak" : "Spacebar works too";
 
   return (
     <div className="flex w-full flex-col items-center justify-center gap-3 sm:gap-5">
@@ -32,8 +35,8 @@ export default function PushToTalk({ active, compact, locked, muted, disabled, o
       >
         <span className="flex flex-col items-center gap-2 sm:gap-3">
           {muted ? <MicOff className={compact ? "h-8 w-8" : "h-14 w-14"} /> : active ? <Radio className={compact ? "h-8 w-8" : "h-14 w-14"} /> : <Mic className={compact ? "h-8 w-8" : "h-14 w-14"} />}
-          <span className={`${compact ? "text-sm" : "text-lg"} font-bold`}>{muted ? "Muted by Admin" : locked ? "Mic Locked" : active ? "Talking" : "Hold to Talk"}</span>
-          <span className="text-xs opacity-70">{muted ? "Admin can unmute you" : locked ? "Tap unlock to stop" : "Spacebar works too"}</span>
+          <span className={`${compact ? "text-sm" : "text-lg"} font-bold`}>{muted ? mutedLabel : locked ? "Mic Locked" : active ? "Talking" : "Hold to Talk"}</span>
+          <span className="text-xs opacity-70">{muted ? mutedHint : locked ? "Tap unlock to stop" : "Spacebar works too"}</span>
         </span>
       </motion.button>
 
@@ -52,8 +55,21 @@ export default function PushToTalk({ active, compact, locked, muted, disabled, o
           {locked ? "Unlock mic" : "Lock mic"}
         </button>
 
+        <button
+          type="button"
+          disabled={muteDisabled}
+          onClick={() => onToggleMute?.(!selfMuted)}
+          className={`inline-flex min-h-11 items-center justify-center gap-2 rounded-full border px-4 py-2 text-sm font-medium transition disabled:cursor-not-allowed disabled:opacity-50 ${
+            selfMuted || hostMuted
+              ? "border-amberglow/50 bg-amberglow/10 text-amberglow"
+              : "border-line bg-white/[0.05] text-slate-200 hover:bg-white/10"
+          }`}
+        >
+          {selfMuted || hostMuted ? <MicOff className="h-4 w-4" /> : <Mic className="h-4 w-4" />}
+          {hostMuted ? "Admin muted" : selfMuted ? "Unmute mic" : "Mute mic"}
+        </button>
       </div>
-      {muted && (
+      {hostMuted && (
         <p className="max-w-xs text-center text-xs text-amberglow">Your mic was muted by the room admin.</p>
       )}
     </div>

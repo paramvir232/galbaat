@@ -39,6 +39,7 @@ export async function uploadRoomFile(roomId, file, username, options = {}) {
   body.append("username", username);
   if (options.chatOnly) body.append("chatOnly", "true");
   if (options.message) body.append("message", options.message);
+  if (options.clientUploadId) body.append("clientUploadId", options.clientUploadId);
 
   const res = await fetch(`${API_URL}/api/rooms/${encodeURIComponent(roomId)}/files`, {
     method: "POST",
@@ -52,6 +53,6 @@ export async function uploadRoomFile(roomId, file, username, options = {}) {
 
 export function apiAssetUrl(path) {
   if (!path) return "#";
-  if (/^https?:\/\//i.test(path)) return path;
+  if (/^(https?:|blob:|data:)/i.test(path)) return path;
   return `${API_URL}${path}`;
 }

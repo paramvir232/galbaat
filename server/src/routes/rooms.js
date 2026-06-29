@@ -93,13 +93,14 @@ roomsRouter.post("/:roomId/files", ensureRoom, upload.single("file"), async (req
       message: message.message,
       attachments: message.attachments,
       reactions: {},
+      clientUploadId: cleanText(req.body.clientUploadId || "", 80),
       editedAt: message.editedAt || null,
       deletedAt: message.deletedAt || null,
       timestamp: message.timestamp
     };
     req.app.get("io")?.to(req.roomId).emit("chat:message", payload);
 
-    res.status(201).json({ file });
+    res.status(201).json({ file, message: payload });
   } catch (error) {
     await removeUploadedFile(req.roomId, file?.id);
     next(error);

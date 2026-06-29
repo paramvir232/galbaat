@@ -330,6 +330,24 @@ export function registerSocketHandlers(io) {
       touchRoom(normalizedRoomId, rooms.get(normalizedRoomId).size).catch(() => {});
     });
 
+    socket.on("participant:rename", ({ roomId, username }, ack) => {
+      const normalizedRoomId = String(roomId || socket.data.roomId || "").toUpperCase();
+      const users = rooms.get(normalizedRoomId);
+      const user = users?.get(socket.id);
+      if (!user) {
+        ack?.({ ok: false, error: "Not in room" });
+        return;
+      }
+
+      const nextUsername = cleanUsername(username);
+      user.username = nextUsername;
+      socket.data.username = nextUsername;
+      const updatedUser = publicUser(user);
+      ack?.({ ok: true, user: updatedUser });
+      emitParticipants(io, normalizedRoomId);
+      touchRoom(normalizedRoomId, users.size).catch(() => {});
+    });
+
     socket.on("participant:video", ({ roomId, video }) => {
       const normalizedRoomId = String(roomId || socket.data.roomId || "").toUpperCase();
       const user = rooms.get(normalizedRoomId)?.get(socket.id);

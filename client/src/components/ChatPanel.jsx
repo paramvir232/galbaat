@@ -35,6 +35,65 @@ function canReactToMessage(message) {
   return /^[a-f\d]{24}$/i.test(String(message.id || ""));
 }
 
+function trimUrlToken(token) {
+  let url = token;
+  let suffix = "";
+  while (/[),.!?:;\]]$/.test(url)) {
+    suffix = `${url.slice(-1)}${suffix}`;
+    url = url.slice(0, -1);
+  }
+  return { url, suffix };
+}
+
+function normalizeUrl(url) {
+  return /^https?:\/\//i.test(url) ? url : `https://${url}`;
+}
+
+function getMessageParts(text = "") {
+  const pattern = /(https?:\/\/[^\s<>"']+|www\.[^\s<>"']+)/gi;
+  const parts = [];
+  let lastIndex = 0;
+  let match;
+
+  while ((match = pattern.exec(text)) !== null) {
+    if (match.index > lastIndex) {
+      parts.push({ type: "text", value: text.slice(lastIndex, match.index) });
+    }
+
+    const { url, suffix } = trimUrlToken(match[0]);
+    if (url) {
+      parts.push({ type: "link", value: url, href: normalizeUrl(url) });
+    }
+    if (suffix) {
+      parts.push({ type: "text", value: suffix });
+    }
+    lastIndex = match.index + match[0].length;
+  }
+
+  if (lastIndex < text.length) {
+    parts.push({ type: "text", value: text.slice(lastIndex) });
+  }
+
+  return parts.length ? parts : [{ type: "text", value: text }];
+}
+
+function firstMessageUrl(text = "") {
+  return getMessageParts(text).find((part) => part.type === "link")?.href || "";
+}
+
+function linkPreview(url) {
+  try {
+    const parsed = new window.URL(url);
+    return {
+      href: parsed.href,
+      host: parsed.hostname.replace(/^www\./i, ""),
+      path: `${parsed.pathname}${parsed.search}`.replace(/^\/$/, "")
+    };
+  } catch {
+    return null;
+  }
+}
+
 function encodeWav(samples, sampleRate) {
   const length = samples.reduce((total, chunk) => total + chunk.length, 0);
   const dataSize = length * 2;
@@ -211,17 +270,22 @@ export default function ChatPanel({
 
   function handlePaste(event) {
     const imageItem = [...(event.clipboardData?.items || [])].find((item) => item.kind === "file" && item.type.startsWith("image/"));
-    if (!imageItem || fileUploading) return;
+    if (!imageItem) return;
 
     const file = imageItem.getAsFile();
     if (!file) return;
 
     event.preventDefault();
+    const clean = DOMPurify.sanitize(value.trim(), { ALLOWED_TAGS: [], ALLOWED_ATTR: [] });
     const namedFile = new window.File([file], file.name || pastedImageName(file), {
       type: file.type,
       lastModified: file.lastModified || Date.now()
     });
-    queueAttachment(namedFile);
+    onUploadFile(namedFile, { chatOnly: true, message: clean, optimistic: true });
+    setValue("");
+    setShowEmojis(false);
+    setMention(null);
+    onTypingStop();
   }
 
   function insertMention(username) {
@@ -402,6 +466,42 @@ export default function ChatPanel({
     );
   }
 
+  function renderMessageText(text) {
+    return getMessageParts(text).map((part, index) => {
+      if (part.type !== "link") return <span key={`${part.type}-${index}`}>{part.value}</span>;
+      return (
+        <a
+          key={`${part.type}-${index}`}
+          href={part.href}
+          target="_blank"
+          rel="noreferrer"
+          className="font-medium text-mint underline decoration-mint/40 underline-offset-2 hover:text-skyglass"
+        >
+          {part.value}
+        </a>
+      );
+    });
+  }
+
+  function renderLinkPreview(url) {
+    const preview = linkPreview(url);
+    if (!preview) return null;
+
+    return (
+      <a
+        href={preview.href}
+        target="_blank"
+        rel="noreferrer"
+        className="mt-2 block max-w-full overflow-hidden rounded-md border border-line bg-ink/50 transition hover:border-mint/50 hover:bg-white/[0.06]"
+      >
+        <span className="block border-l-2 border-mint px-3 py-2">
+          <span className="block truncate text-sm font-semibold text-slate-100">{preview.host}</span>
+          <span className="mt-0.5 block truncate text-xs text-slate-400">{preview.path || preview.href}</span>
+        </span>
+      </a>
+    );
+  }
+
   function reactToMessage(messageId, emoji) {
     setReactionPickerId(null);
     onReact?.(messageId, emoji);
@@ -466,6 +566,7 @@ export default function ChatPanel({
           const reactionAllowed = canReactToMessage(message) && !isDeleted;
           const canManage = isOwn && reactionAllowed;
           const isEditing = editingMessage?.id === message.id;
+          const previewUrl = !isDeleted && message.message ? firstMessageUrl(message.message) : "";
           return (
             <div
               key={message.id || `${message.username}-${message.timestamp}`}
@@ -545,7 +646,12 @@ export default function ChatPanel({
                 </div>
               ) : (
                 <>
-                  {message.message && <p className="break-anywhere text-sm leading-5 text-slate-200 [overflow-wrap:anywhere]">{message.message}</p>}
+                  {message.message && (
+                    <>
+                      <p className="break-anywhere text-sm leading-5 text-slate-200 [overflow-wrap:anywhere]">{renderMessageText(message.message)}</p>
+                      {previewUrl && renderLinkPreview(previewUrl)}
+                    </>
+                  )}
                   {(message.attachments || []).map((file) => (
                     <div key={file.id}>{renderAttachment(file)}</div>
                   ))}
