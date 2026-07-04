@@ -319,9 +319,9 @@ export function useWebRtcRoom(socket, roomId) {
   );
 
   const connectToPeers = useCallback(
-    async (peers) => {
+    async (peers, initiator = true) => {
       await ensureMedia();
-      peers.forEach((peer) => createPeer(peer.id, true));
+      await Promise.all(peers.map((peer) => createPeer(peer.id, initiator)));
     },
     [createPeer, ensureMedia]
   );

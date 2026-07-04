@@ -185,6 +185,38 @@ function escapeHtml(value = "") {
     .replace(/"/g, "&quot;");
 }
 
+function escapeAttribute(value = "") {
+  return escapeHtml(value).replace(/'/g, "&#39;");
+}
+
+function imageSize(src) {
+  return new Promise((resolve) => {
+    const image = new window.Image();
+    image.onload = () => resolve({ width: image.naturalWidth || 640, height: image.naturalHeight || 360 });
+    image.onerror = () => resolve({ width: 640, height: 360 });
+    image.src = src;
+  });
+}
+
+function readFileAsDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new window.FileReader();
+    reader.onload = () => resolve(String(reader.result || ""));
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+
+function cursorForTool(tool, isDragging, canEdit) {
+  if (!canEdit) return isDragging ? "grabbing" : "grab";
+  if (tool === "hand") return isDragging ? "grabbing" : "grab";
+  if (tool === "select") return "default";
+  if (tool === "text") return "text";
+  if (tool === "eraser") return "cell";
+  if (tool === "pen" || tool === "highlighter") return "crosshair";
+  return "crosshair";
+}
+
 function exportBounds(elements) {
   if (!elements.length) return { x: -640, y: -360, width: 1280, height: 720 };
   const bounds = elements.map(elementBounds);
@@ -235,6 +267,9 @@ function elementToSvg(element) {
   if (element.type === "text") {
     return `<text x="${element.x}" y="${element.y + 24}"${rotate} fill="${escapeHtml(element.stroke)}" opacity="${element.opacity}" font-size="${Math.max(16, element.strokeWidth * 5)}" font-weight="700">${escapeHtml(element.text)}</text>`;
   }
+  if (element.type === "image" && element.src) {
+    return `<image href="${escapeAttribute(element.src)}" x="${bounds.x}" y="${bounds.y}" width="${bounds.width}" height="${bounds.height}"${rotate} opacity="${element.opacity || 1}" preserveAspectRatio="xMidYMid meet" />`;
+  }
   return "";
 }
 
@@ -264,8 +299,19 @@ export default function Whiteboard({ open, roomId, socket, currentUser, particip
   const [error, setError] = useState("");
   const [panelCollapsed, setPanelCollapsed] = useState(false);
   const [exportMenuOpen, setExportMenuOpen] = useState(false);
+  const [canEditBoard, setCanEditBoard] = useState(Boolean(currentUser?.host));
+  const [openVolumeId, setOpenVolumeId] = useState(null);
+  const [isDragging, setIsDragging] = useState(false);
 
   const selectedElement = useMemo(() => elements.find((element) => element.id === selectedIds[0]), [elements, selectedIds]);
+  const boardCursor = useMemo(() => cursorForTool(tool, isDragging, canEditBoard), [canEditBoard, isDragging, tool]);
+
+  useEffect(() => {
+    if (open && !canEditBoard && tool !== "hand") {
+      setTool("hand");
+      setSelectedIds([]);
+    }
+  }, [canEditBoard, open, tool]);
 
   useEffect(() => {
     elementsRef.current = elements;
@@ -276,12 +322,12 @@ export default function Whiteboard({ open, roomId, socket, currentUser, particip
   }, [background]);
 
   const emitBoard = useCallback((nextElements = elementsRef.current, nextBackground = backgroundRef.current) => {
-    if (!open) return;
+    if (!open || !canEditBoard) return;
     window.clearTimeout(saveTimerRef.current);
     saveTimerRef.current = window.setTimeout(() => {
       socket.emit("whiteboard:update", { roomId, board: { elements: nextElements, background: nextBackground } });
     }, 120);
-  }, [open, roomId, socket]);
+  }, [canEditBoard, open, roomId, socket]);
 
   const commitElements = useCallback((nextElements, options = {}) => {
     const previous = cloneElements(elementsRef.current);
@@ -300,7 +346,7 @@ export default function Whiteboard({ open, roomId, socket, currentUser, particip
   }
 
   function emitElement(element, action = "upsert", immediate = false) {
-    if (!open || !element) return;
+    if (!open || !canEditBoard || !element) return;
     const now = Date.now();
     if (!immediate && now - lastElementSyncRef.current < 16) return;
     lastElementSyncRef.current = now;
@@ -332,6 +378,7 @@ export default function Whiteboard({ open, roomId, socket, currentUser, particip
       setBackground(board.background || "#0f172a");
       backgroundRef.current = board.background || "#0f172a";
       setBoardUsers(board.users || []);
+      setCanEditBoard(Boolean(ack.canEditBoard || currentUser?.host));
       setHistory([]);
       setRedoStack([]);
     });
@@ -385,6 +432,11 @@ export default function Whiteboard({ open, roomId, socket, currentUser, particip
     }
     function onBoardUsers(users) {
       setBoardUsers(users || []);
+      const me = users?.find((user) => user.id === currentUser?.id);
+      if (me) setCanEditBoard(Boolean(me.canEditBoard));
+    }
+    function onPermission({ canEditBoard: nextCanEdit }) {
+      setCanEditBoard(Boolean(nextCanEdit));
     }
 
     socket.on("whiteboard:update", onBoardUpdate);
@@ -393,6 +445,7 @@ export default function Whiteboard({ open, roomId, socket, currentUser, particip
     socket.on("whiteboard:cursor:left", onCursorLeft);
     socket.on("whiteboard:selection", onSelection);
     socket.on("whiteboard:users", onBoardUsers);
+    socket.on("whiteboard:permission", onPermission);
     return () => {
       window.clearTimeout(saveTimerRef.current);
       socket.emit("whiteboard:leave", { roomId });
@@ -402,8 +455,9 @@ export default function Whiteboard({ open, roomId, socket, currentUser, particip
       socket.off("whiteboard:cursor:left", onCursorLeft);
       socket.off("whiteboard:selection", onSelection);
       socket.off("whiteboard:users", onBoardUsers);
+      socket.off("whiteboard:permission", onPermission);
     };
-  }, [open, roomId, socket]);
+  }, [currentUser?.host, currentUser?.id, open, roomId, socket]);
 
   function screenToWorld(event) {
     const rect = stageRef.current.getBoundingClientRect();
@@ -444,8 +498,9 @@ export default function Whiteboard({ open, roomId, socket, currentUser, particip
     if (event.button !== 0) return;
     event.currentTarget.setPointerCapture(event.pointerId);
     const point = screenToWorld(event);
+    setIsDragging(true);
 
-    if (tool === "hand" || event.altKey) {
+    if (!canEditBoard || tool === "hand" || event.altKey) {
       dragRef.current = { mode: "pan", startX: event.clientX, startY: event.clientY, view };
       return;
     }
@@ -568,6 +623,7 @@ export default function Whiteboard({ open, roomId, socket, currentUser, particip
   }
 
   function endPointer() {
+    setIsDragging(false);
     const drag = dragRef.current;
     if (!drag || drag.mode === "pan") {
       dragRef.current = null;
@@ -583,6 +639,7 @@ export default function Whiteboard({ open, roomId, socket, currentUser, particip
   }
 
   function undo() {
+    if (!canEditBoard) return;
     setHistory((current) => {
       if (!current.length) return current;
       const previous = current[current.length - 1];
@@ -595,6 +652,7 @@ export default function Whiteboard({ open, roomId, socket, currentUser, particip
   }
 
   function redo() {
+    if (!canEditBoard) return;
     setRedoStack((current) => {
       if (!current.length) return current;
       const next = current[0];
@@ -607,7 +665,7 @@ export default function Whiteboard({ open, roomId, socket, currentUser, particip
   }
 
   function removeSelected() {
-    if (!selectedIds.length) return;
+    if (!canEditBoard || !selectedIds.length) return;
     const previous = cloneElements(elementsRef.current);
     const removed = elementsRef.current.filter((element) => selectedIds.includes(element.id));
     const next = elementsRef.current.filter((element) => !selectedIds.includes(element.id));
@@ -619,7 +677,7 @@ export default function Whiteboard({ open, roomId, socket, currentUser, particip
   }
 
   function clearBoard() {
-    if (!elementsRef.current.length) return;
+    if (!canEditBoard || !elementsRef.current.length) return;
     if (!window.confirm("Clear the whole whiteboard for everyone? This cannot be undone.")) return;
     const previous = cloneElements(elementsRef.current);
     applyElements([]);
@@ -634,15 +692,55 @@ export default function Whiteboard({ open, roomId, socket, currentUser, particip
   }
 
   function pasteSelected() {
-    if (!clipboardRef.current.length) return;
+    if (!canEditBoard || !clipboardRef.current.length) return;
     const pasted = clipboardRef.current.map((element) => ({ ...element, id: makeId(), x: element.x + 24, y: element.y + 24, points: element.points?.map((point) => [point[0] + 24, point[1] + 24]) }));
     commitElements([...elementsRef.current, ...pasted]);
     updateSelection(pasted.map((element) => element.id));
   }
 
   function rotateSelected() {
-    if (!selectedIds.length) return;
+    if (!canEditBoard || !selectedIds.length) return;
     commitElements(elementsRef.current.map((element) => (selectedIds.includes(element.id) ? { ...element, rotation: normalizeAngle((element.rotation || 0) + 15) } : element)));
+  }
+
+  async function addImageFromFile(file) {
+    if (!canEditBoard || !file?.type?.startsWith("image/")) return false;
+    if (file.size > 2_000_000) {
+      setError("Image is too large for the whiteboard. Try an image under 2 MB.");
+      return true;
+    }
+
+    const src = await readFileAsDataUrl(file);
+    const size = await imageSize(src);
+    const maxWidth = 520;
+    const scale = Math.min(1, maxWidth / Math.max(1, size.width));
+    const width = Math.max(80, Math.round(size.width * scale));
+    const height = Math.max(80, Math.round(size.height * scale));
+    const centerX = (stageRef.current?.clientWidth || 960) / 2;
+    const centerY = (stageRef.current?.clientHeight || 540) / 2;
+    const x = (centerX - view.x) / view.scale - width / 2;
+    const y = (centerY - view.y) / view.scale - height / 2;
+    const element = {
+      id: makeId(),
+      type: "image",
+      x,
+      y,
+      width,
+      height,
+      rotation: 0,
+      src,
+      stroke: "#f8fafc",
+      fill: "transparent",
+      strokeWidth: 1,
+      opacity: 1
+    };
+    commitElements([...elementsRef.current, element]);
+    updateSelection([element.id]);
+    return true;
+  }
+
+  function setBoardEditPermission(targetId, nextCanEdit) {
+    socket.emit("whiteboard:permission", { roomId, targetId, canEdit: nextCanEdit });
   }
 
   useEffect(() => {
@@ -669,10 +767,21 @@ export default function Whiteboard({ open, roomId, socket, currentUser, particip
       if (key === "delete" || key === "backspace") removeSelected();
       if (key === "r" && selectedIds.length) rotateSelected();
       const matched = TOOLS.find((item) => item.key.toLowerCase() === key);
-      if (matched) setTool(matched.id);
+      if (matched && (canEditBoard || matched.id === "hand")) setTool(matched.id);
+    }
+    function handlePaste(event) {
+      if (!canEditBoard) return;
+      const imageFile = [...(event.clipboardData?.files || [])].find((file) => file.type.startsWith("image/"));
+      if (!imageFile) return;
+      event.preventDefault();
+      addImageFromFile(imageFile).catch(() => setError("Could not paste that image on the whiteboard."));
     }
     window.addEventListener("keydown", handleKey);
-    return () => window.removeEventListener("keydown", handleKey);
+    window.addEventListener("paste", handlePaste);
+    return () => {
+      window.removeEventListener("keydown", handleKey);
+      window.removeEventListener("paste", handlePaste);
+    };
   });
 
   function setZoom(nextScale) {
@@ -698,30 +807,41 @@ export default function Whiteboard({ open, roomId, socket, currentUser, particip
     const link = document.createElement("a");
     link.href = url;
     link.download = filename;
+    document.body.appendChild(link);
     link.click();
+    link.remove();
     window.setTimeout(() => window.URL.revokeObjectURL(url), 1000);
   }
 
   async function downloadAsImage() {
     setExportMenuOpen(false);
-    const { bounds, svg } = exportSvgMarkup();
-    const svgUrl = window.URL.createObjectURL(new window.Blob([svg], { type: "image/svg+xml;charset=utf-8" }));
-    const image = new window.Image();
-    image.decoding = "async";
-    await new Promise((resolve, reject) => {
-      image.onload = resolve;
-      image.onerror = reject;
-      image.src = svgUrl;
-    });
-    const canvas = document.createElement("canvas");
-    canvas.width = Math.round(bounds.width);
-    canvas.height = Math.round(bounds.height);
-    const context = canvas.getContext("2d");
-    context.drawImage(image, 0, 0);
-    window.URL.revokeObjectURL(svgUrl);
-    canvas.toBlob((blob) => {
-      if (blob) downloadBlob(blob, `galbaat-whiteboard-${roomId}.png`);
-    }, "image/png");
+    try {
+      const { bounds, svg } = exportSvgMarkup();
+      const image = new window.Image();
+      image.decoding = "async";
+      await new Promise((resolve, reject) => {
+        image.onload = resolve;
+        image.onerror = reject;
+        image.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
+      });
+      const canvas = document.createElement("canvas");
+      canvas.width = Math.round(bounds.width);
+      canvas.height = Math.round(bounds.height);
+      const context = canvas.getContext("2d");
+      context.drawImage(image, 0, 0);
+      canvas.toBlob((blob) => {
+        if (blob) downloadBlob(blob, `galbaat-whiteboard-${roomId}.png`);
+        else setError("Could not create the whiteboard image.");
+      }, "image/png");
+    } catch {
+      setError("Could not download this whiteboard as an image.");
+    }
+  }
+
+  function downloadAsSvg() {
+    setExportMenuOpen(false);
+    const { svg } = exportSvgMarkup();
+    downloadBlob(new window.Blob([svg], { type: "image/svg+xml;charset=utf-8" }), `galbaat-whiteboard-${roomId}.svg`);
   }
 
   function downloadAsHtml() {
@@ -745,7 +865,7 @@ export default function Whiteboard({ open, roomId, socket, currentUser, particip
 <body>
   <header>
     <h1>GalBaat Whiteboard</h1>
-    <p>Room ${escapeHtml(roomId)} · Exported ${new Date().toLocaleString()}</p>
+    <p>Room ${escapeHtml(roomId)} - Exported ${new Date().toLocaleString()}</p>
   </header>
   <main>${svg}</main>
 </body>
@@ -792,11 +912,14 @@ export default function Whiteboard({ open, roomId, socket, currentUser, particip
         </text>
       );
     }
+    if (element.type === "image" && element.src) {
+      return <image key={element.id} href={element.src} x={bounds.x} y={bounds.y} width={bounds.width} height={bounds.height} transform={rotate} opacity={element.opacity || 1} preserveAspectRatio="xMidYMid meet" />;
+    }
     return null;
   }
 
   if (!open) return null;
-  const boardVoiceUsers = boardUsers.map((user) => participants.find((participant) => participant.id === user.id) || user);
+  const boardVoiceUsers = boardUsers.map((user) => ({ ...(participants.find((participant) => participant.id === user.id) || {}), ...user }));
   const currentBoardUser = boardVoiceUsers.find((user) => user.id === currentUser?.id) || currentUser;
 
   return (
@@ -804,7 +927,7 @@ export default function Whiteboard({ open, roomId, socket, currentUser, particip
       <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-line bg-panel/95 px-3 py-2">
         <div className="min-w-0">
           <h2 className="text-sm font-black">GalBaat Whiteboard</h2>
-          <p className="text-xs text-slate-400">Board {roomId} · Autosaves as you draw</p>
+          <p className="text-xs text-slate-400">Board {roomId} - Autosaves as you draw</p>
         </div>
         <div className="flex max-w-full flex-wrap items-center justify-center gap-1 rounded-lg border border-line bg-ink/60 p-1">
           {TOOLS.map((item) => {
@@ -814,20 +937,21 @@ export default function Whiteboard({ open, roomId, socket, currentUser, particip
                 key={item.id}
                 type="button"
                 onClick={() => setTool(item.id)}
+                disabled={!canEditBoard && item.id !== "hand"}
                 title={`${item.label} (${item.key})`}
-                className={`grid h-9 w-9 place-items-center rounded-md transition ${tool === item.id ? "bg-mint text-ink" : "text-slate-300 hover:bg-white/10"}`}
+                className={`grid h-9 w-9 place-items-center rounded-md transition disabled:cursor-not-allowed disabled:opacity-40 ${tool === item.id ? "bg-mint text-ink" : "text-slate-300 hover:bg-white/10"}`}
               >
                 <Icon className="h-4 w-4" />
               </button>
             );
           })}
           <span className="mx-1 hidden h-7 w-px bg-line sm:block" />
-          <button type="button" onClick={undo} title="Undo (Ctrl+Z)" className="grid h-9 w-9 place-items-center rounded-md text-slate-300 hover:bg-white/10"><Undo2 className="h-4 w-4" /></button>
-          <button type="button" onClick={redo} title="Redo (Ctrl+Y)" className="grid h-9 w-9 place-items-center rounded-md text-slate-300 hover:bg-white/10"><Redo2 className="h-4 w-4" /></button>
+          <button type="button" onClick={undo} disabled={!canEditBoard} title="Undo (Ctrl+Z)" className="grid h-9 w-9 place-items-center rounded-md text-slate-300 hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-40"><Undo2 className="h-4 w-4" /></button>
+          <button type="button" onClick={redo} disabled={!canEditBoard} title="Redo (Ctrl+Y)" className="grid h-9 w-9 place-items-center rounded-md text-slate-300 hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-40"><Redo2 className="h-4 w-4" /></button>
           <button type="button" onClick={copySelected} title="Copy (Ctrl+C)" className="grid h-9 w-9 place-items-center rounded-md text-slate-300 hover:bg-white/10"><Copy className="h-4 w-4" /></button>
-          <button type="button" onClick={removeSelected} title="Delete" className="grid h-9 w-9 place-items-center rounded-md text-slate-300 hover:bg-white/10"><Trash2 className="h-4 w-4" /></button>
-          <button type="button" onClick={rotateSelected} title="Rotate (R)" className="grid h-9 w-9 place-items-center rounded-md text-slate-300 hover:bg-white/10"><RotateCw className="h-4 w-4" /></button>
-          <button type="button" onClick={clearBoard} title="Clear board" className="inline-flex h-9 items-center gap-2 rounded-md border border-red-400/30 bg-red-500/10 px-3 text-xs font-bold text-red-100 hover:bg-red-500/20">
+          <button type="button" onClick={removeSelected} disabled={!canEditBoard} title="Delete" className="grid h-9 w-9 place-items-center rounded-md text-slate-300 hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-40"><Trash2 className="h-4 w-4" /></button>
+          <button type="button" onClick={rotateSelected} disabled={!canEditBoard} title="Rotate (R)" className="grid h-9 w-9 place-items-center rounded-md text-slate-300 hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-40"><RotateCw className="h-4 w-4" /></button>
+          <button type="button" onClick={clearBoard} disabled={!canEditBoard} title="Clear board" className="inline-flex h-9 items-center gap-2 rounded-md border border-red-400/30 bg-red-500/10 px-3 text-xs font-bold text-red-100 hover:bg-red-500/20 disabled:cursor-not-allowed disabled:opacity-40">
             <Trash2 className="h-4 w-4" />
             Clear
           </button>
@@ -848,6 +972,10 @@ export default function Whiteboard({ open, roomId, socket, currentUser, particip
                 <button type="button" onClick={downloadAsImage} className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-sm text-slate-200 hover:bg-white/10">
                   <FileImage className="h-4 w-4 text-mint" />
                   Download as image
+                </button>
+                <button type="button" onClick={downloadAsSvg} className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-sm text-slate-200 hover:bg-white/10">
+                  <FileImage className="h-4 w-4 text-amberglow" />
+                  Download as SVG
                 </button>
                 <button type="button" onClick={downloadAsHtml} className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-sm text-slate-200 hover:bg-white/10">
                   <FileCode className="h-4 w-4 text-skyglass" />
@@ -895,11 +1023,11 @@ export default function Whiteboard({ open, roomId, socket, currentUser, particip
               <div className="grid grid-cols-2 gap-2">
                 <label className="rounded-lg border border-line bg-ink/50 p-2 text-xs text-slate-300">
                   Stroke
-                  <input type="color" value={stroke} onChange={(event) => setStroke(event.target.value)} className="mt-2 h-9 w-full cursor-pointer rounded-md border border-line bg-transparent" />
+                  <input type="color" value={stroke} disabled={!canEditBoard} onChange={(event) => setStroke(event.target.value)} className="mt-2 h-9 w-full cursor-pointer rounded-md border border-line bg-transparent disabled:cursor-not-allowed disabled:opacity-50" />
                 </label>
                 <label className="rounded-lg border border-line bg-ink/50 p-2 text-xs text-slate-300">
                   Fill
-                  <input type="color" value={fill === "transparent" ? "#111827" : fill} onChange={(event) => setFill(event.target.value)} className="mt-2 h-9 w-full cursor-pointer rounded-md border border-line bg-transparent" />
+                  <input type="color" value={fill === "transparent" ? "#111827" : fill} disabled={!canEditBoard} onChange={(event) => setFill(event.target.value)} className="mt-2 h-9 w-full cursor-pointer rounded-md border border-line bg-transparent disabled:cursor-not-allowed disabled:opacity-50" />
                 </label>
               </div>
               <div className="mt-2 flex flex-wrap gap-1.5">
@@ -907,36 +1035,38 @@ export default function Whiteboard({ open, roomId, socket, currentUser, particip
                   <button
                     key={color}
                     type="button"
+                    disabled={!canEditBoard}
                     onClick={() => setStroke(color)}
                     title={color}
-                    className={`h-7 w-7 rounded-full border ${stroke === color ? "border-mint ring-2 ring-mint/30" : "border-white/20"}`}
+                    className={`h-7 w-7 rounded-full border disabled:cursor-not-allowed disabled:opacity-50 ${stroke === color ? "border-mint ring-2 ring-mint/30" : "border-white/20"}`}
                     style={{ background: color }}
                   />
                 ))}
               </div>
-              <button type="button" onClick={() => setFill("transparent")} className="mt-2 inline-flex min-h-9 w-full items-center justify-center gap-2 rounded-lg border border-line bg-white/[0.04] text-xs font-semibold text-slate-200 hover:bg-white/10">
+              <button type="button" disabled={!canEditBoard} onClick={() => setFill("transparent")} className="mt-2 inline-flex min-h-9 w-full items-center justify-center gap-2 rounded-lg border border-line bg-white/[0.04] text-xs font-semibold text-slate-200 hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-50">
                 <PaintBucket className="h-4 w-4" />
                 No fill
               </button>
               <label className="mt-3 block text-xs font-semibold text-slate-300">
                 Width <span className="float-right text-slate-400">{strokeWidth}px</span>
-                <input type="range" min="1" max="24" value={strokeWidth} onChange={(event) => setStrokeWidth(Number(event.target.value))} className="mt-2 w-full accent-mint" />
+                <input type="range" min="1" max="24" value={strokeWidth} disabled={!canEditBoard} onChange={(event) => setStrokeWidth(Number(event.target.value))} className="mt-2 w-full accent-mint disabled:cursor-not-allowed disabled:opacity-50" />
               </label>
               <label className="mt-3 block text-xs font-semibold text-slate-300">
                 Opacity <span className="float-right text-slate-400">{Math.round(opacity * 100)}%</span>
-                <input type="range" min="0.1" max="1" step="0.05" value={opacity} onChange={(event) => setOpacity(Number(event.target.value))} className="mt-2 w-full accent-mint" />
+                <input type="range" min="0.1" max="1" step="0.05" value={opacity} disabled={!canEditBoard} onChange={(event) => setOpacity(Number(event.target.value))} className="mt-2 w-full accent-mint disabled:cursor-not-allowed disabled:opacity-50" />
               </label>
               <label className="mt-3 flex items-center justify-between gap-3 rounded-lg border border-line bg-ink/50 p-2 text-xs font-semibold text-slate-300">
                 Background
                 <input
                   type="color"
                   value={background}
+                  disabled={!canEditBoard}
                   onChange={(event) => {
                     setBackground(event.target.value);
                     backgroundRef.current = event.target.value;
                     emitBoard(elementsRef.current, event.target.value);
                   }}
-                  className="h-8 w-12 cursor-pointer rounded border border-line bg-transparent"
+                  className="h-8 w-12 cursor-pointer rounded border border-line bg-transparent disabled:cursor-not-allowed disabled:opacity-50"
                 />
               </label>
             </section>
@@ -948,62 +1078,72 @@ export default function Whiteboard({ open, roomId, socket, currentUser, particip
               </div>
               <div className="space-y-2">
                 {boardVoiceUsers.length ? boardVoiceUsers.map((user) => (
-                  <div key={user.id} className="flex items-center gap-2 rounded-lg border border-line bg-ink/50 p-2">
-                    <span className="h-2.5 w-2.5 rounded-full" style={{ background: user.cursorColor || user.color || "#29d3a7" }} />
-                    <div className="min-w-0 flex-1">
-                      <p className="truncate text-sm font-semibold text-slate-100">{user.username}</p>
-                      <p className="text-xs text-slate-500">{user.id === currentUser?.id ? "You" : user.speaking ? "Speaking" : "Connected"}</p>
+                  <div key={user.id} className="rounded-lg border border-line bg-ink/50 p-2">
+                    <div className="flex items-center gap-2">
+                      <span className="h-2.5 w-2.5 rounded-full" style={{ background: user.cursorColor || user.color || "#29d3a7" }} />
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-sm font-semibold text-slate-100">{user.username}</p>
+                        <p className="text-xs text-slate-500">{user.id === currentUser?.id ? (canEditBoard ? "You can edit" : "View only") : user.canEditBoard ? "Can edit" : "View only"}</p>
+                      </div>
+                      {currentUser?.host && user.id !== currentUser?.id && !user.host && (
+                        <button
+                          type="button"
+                          onClick={() => setBoardEditPermission(user.id, !user.canEditBoard)}
+                          title={user.canEditBoard ? "Remove edit permission" : "Allow editing"}
+                          className={`grid h-8 w-8 place-items-center rounded-md border transition ${
+                            user.canEditBoard ? "border-mint/40 bg-mint/15 text-mint" : "border-line bg-white/[0.04] text-slate-400 hover:bg-white/10 hover:text-slate-100"
+                          }`}
+                        >
+                          <Pencil className="h-3.5 w-3.5" />
+                        </button>
+                      )}
+                      {user.id === currentUser?.id ? (
+                        <button
+                          type="button"
+                          onClick={() => onSelfMute?.(!currentBoardUser?.selfMuted)}
+                          disabled={Boolean(currentBoardUser?.hostMuted)}
+                          title={currentBoardUser?.hostMuted ? "Admin muted" : currentBoardUser?.selfMuted ? "Unmute mic" : "Mute mic"}
+                          className={`grid h-8 w-8 place-items-center rounded-md border transition disabled:cursor-not-allowed disabled:opacity-50 ${
+                            currentBoardUser?.selfMuted || currentBoardUser?.hostMuted ? "border-amberglow/40 bg-amberglow/10 text-amberglow" : "border-line bg-white/[0.04] text-slate-400 hover:bg-white/10 hover:text-slate-100"
+                          }`}
+                        >
+                          {currentBoardUser?.selfMuted || currentBoardUser?.hostMuted ? <MicOff className="h-3.5 w-3.5" /> : <Mic className="h-3.5 w-3.5" />}
+                        </button>
+                      ) : (
+                        <>
+                          <button
+                            type="button"
+                            onClick={() => setOpenVolumeId((id) => (id === user.id ? null : user.id))}
+                            title="Adjust volume"
+                            className={`grid h-8 w-8 place-items-center rounded-md border transition ${
+                              openVolumeId === user.id ? "border-mint/40 bg-mint/15 text-mint" : "border-line bg-white/[0.04] text-slate-400 hover:bg-white/10 hover:text-slate-100"
+                            }`}
+                          >
+                            <Volume2 className="h-3.5 w-3.5" />
+                          </button>
+                          {user.muted ? <MicOff className="h-4 w-4 text-amberglow" /> : <Mic className="h-4 w-4 text-slate-400" />}
+                        </>
+                      )}
                     </div>
-                    {user.muted ? <MicOff className="h-4 w-4 text-amberglow" /> : <Mic className="h-4 w-4 text-slate-400" />}
+                    {user.id !== currentUser?.id && openVolumeId === user.id && (
+                      <label className="mt-2 flex items-center gap-2 rounded-md border border-line bg-panel/70 px-2 py-2 text-xs text-slate-300">
+                        <Volume2 className="h-3.5 w-3.5 shrink-0 text-slate-500" />
+                        <input
+                          type="range"
+                          min="0"
+                          max="150"
+                          value={peerVolumes[user.id] ?? 100}
+                          onChange={(event) => onPeerVolumeChange?.(user.id, Number(event.target.value))}
+                          aria-label={`${user.username} volume`}
+                          className="h-1.5 min-w-0 flex-1 accent-mint"
+                        />
+                        <span className="w-9 text-right text-[11px] text-slate-400">{peerVolumes[user.id] ?? 100}%</span>
+                      </label>
+                    )}
                   </div>
                 )) : (
                   <p className="rounded-lg border border-dashed border-line px-3 py-2 text-xs text-slate-500">No one else is on the board yet.</p>
                 )}
-              </div>
-            </section>
-
-            <section>
-              <div className="mb-2 flex items-center gap-2 text-xs font-bold uppercase tracking-wide text-slate-400">
-                <Volume2 className="h-4 w-4" />
-                Voice control
-              </div>
-              <button
-                type="button"
-                onClick={() => onSelfMute?.(!currentBoardUser?.selfMuted)}
-                disabled={Boolean(currentBoardUser?.hostMuted)}
-                className={`mb-2 inline-flex min-h-10 w-full items-center justify-center gap-2 rounded-lg border px-3 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-50 ${
-                  currentBoardUser?.selfMuted || currentBoardUser?.hostMuted ? "border-amberglow/40 bg-amberglow/10 text-amberglow" : "border-line bg-white/[0.04] text-slate-200 hover:bg-white/10"
-                }`}
-              >
-                {currentBoardUser?.selfMuted || currentBoardUser?.hostMuted ? <MicOff className="h-4 w-4" /> : <Mic className="h-4 w-4" />}
-                {currentBoardUser?.hostMuted ? "Admin muted" : currentBoardUser?.selfMuted ? "Unmute mic" : "Mute mic"}
-              </button>
-              <div className="space-y-2">
-                {boardVoiceUsers.filter((user) => user.id !== currentUser?.id).map((user) => (
-                  <label key={user.id} className="block rounded-lg border border-line bg-ink/50 p-2 text-xs text-slate-300">
-                    <span className="mb-1 flex items-center justify-between gap-2">
-                      <span className="truncate font-semibold text-slate-100">{user.username}</span>
-                      <span>{peerVolumes[user.id] ?? 100}%</span>
-                    </span>
-                    <input
-                      type="range"
-                      min="0"
-                      max="150"
-                      value={peerVolumes[user.id] ?? 100}
-                      onChange={(event) => onPeerVolumeChange?.(user.id, Number(event.target.value))}
-                      className="w-full accent-mint"
-                    />
-                  </label>
-                ))}
-              </div>
-            </section>
-
-            <section>
-              <div className="mb-2 text-xs font-bold uppercase tracking-wide text-slate-400">Zoom</div>
-              <div className="flex items-center gap-2">
-                <button type="button" onClick={() => setZoom(view.scale - 0.1)} className="grid h-9 w-9 place-items-center rounded-lg border border-line bg-white/[0.04] text-slate-300 hover:bg-white/10"><Minus className="h-4 w-4" /></button>
-                <span className="flex-1 rounded-lg border border-line bg-ink/50 py-2 text-center text-sm font-semibold text-slate-200">{Math.round(view.scale * 100)}%</span>
-                <button type="button" onClick={() => setZoom(view.scale + 0.1)} className="grid h-9 w-9 place-items-center rounded-lg border border-line bg-white/[0.04] text-slate-300 hover:bg-white/10"><Plus className="h-4 w-4" /></button>
               </div>
             </section>
           </div>
@@ -1013,6 +1153,7 @@ export default function Whiteboard({ open, roomId, socket, currentUser, particip
         <svg
           ref={stageRef}
           className="h-full w-full touch-none"
+          style={{ cursor: boardCursor }}
           onPointerDown={beginPointer}
           onPointerMove={movePointer}
           onPointerUp={endPointer}
@@ -1060,8 +1201,10 @@ export default function Whiteboard({ open, roomId, socket, currentUser, particip
           </g>
         </svg>
 
-        <div className="absolute right-3 top-16 z-30 hidden max-w-xs rounded-lg border border-line bg-panel/90 p-3 text-xs text-slate-400 shadow-xl lg:block">
-          Shortcuts: V select, H pan, P pen, E eraser, T text, Ctrl+C/V copy paste, Delete remove, Ctrl+Z/Y undo redo.
+        <div className="absolute bottom-4 right-4 z-30 flex items-center gap-2 rounded-xl border border-line bg-panel/95 p-2 shadow-2xl backdrop-blur">
+          <button type="button" onClick={() => setZoom(view.scale - 0.1)} title="Zoom out" className="grid h-9 w-9 place-items-center rounded-lg border border-line bg-white/[0.04] text-slate-300 hover:bg-white/10"><Minus className="h-4 w-4" /></button>
+          <span className="min-w-14 rounded-lg border border-line bg-ink/60 px-2 py-2 text-center text-sm font-semibold text-slate-200">{Math.round(view.scale * 100)}%</span>
+          <button type="button" onClick={() => setZoom(view.scale + 0.1)} title="Zoom in" className="grid h-9 w-9 place-items-center rounded-lg border border-line bg-white/[0.04] text-slate-300 hover:bg-white/10"><Plus className="h-4 w-4" /></button>
         </div>
       </div>
     </div>

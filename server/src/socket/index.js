@@ -11,6 +11,7 @@ const emptyRoomTimers = new Map();
 const boardUsers = new Map();
 const boardStates = new Map();
 const boardSaveTimers = new Map();
+const boardEditPermissions = new Map();
 const joinRequests = new Map();
 const approvedJoinSockets = new Map();
 
@@ -65,7 +66,14 @@ function emitParticipants(io, roomId) {
 function boardParticipants(roomId) {
   const users = rooms.get(roomId);
   const ids = boardUsers.get(roomId) || new Set();
-  return [...ids].map((id) => users?.get(id)).filter(Boolean).map(publicUser);
+  const editors = boardEditPermissions.get(roomId) || new Set();
+  return [...ids]
+    .map((id) => users?.get(id))
+    .filter(Boolean)
+    .map((user) => ({
+      ...publicUser(user),
+      canEditBoard: Boolean(user.host || editors.has(user.id))
+    }));
 }
 
 function emitBoardUsers(io, roomId) {
@@ -137,6 +145,12 @@ function scheduleBoardSave(roomId) {
   boardSaveTimers.set(roomId, timer);
 }
 
+function canEditBoard(roomId, user) {
+  if (!user) return false;
+  if (user.host) return true;
+  return Boolean(boardEditPermissions.get(roomId)?.has(user.id));
+}
+
 function reactionCounts(reactions = {}) {
   const entries = reactions instanceof Map ? [...reactions.entries()] : Object.entries(reactions);
   return Object.fromEntries(entries.map(([emoji, users]) => [emoji, Array.isArray(users) ? users.length : Number(users) || 0]));
@@ -159,7 +173,7 @@ function publicMessage(message) {
 
 function cleanBoardElement(element) {
   const type = cleanText(element?.type, 24);
-  const allowedTypes = new Set(["pen", "highlighter", "line", "arrow", "rectangle", "diamond", "circle", "text"]);
+  const allowedTypes = new Set(["pen", "highlighter", "line", "arrow", "rectangle", "diamond", "circle", "text", "image"]);
   if (!allowedTypes.has(type)) return null;
 
   const points = Array.isArray(element.points)
@@ -167,6 +181,11 @@ function cleanBoardElement(element) {
         .slice(0, 20000)
         .map((point) => [Number(point?.[0]) || 0, Number(point?.[1]) || 0])
     : undefined;
+  const imageSrc =
+    type === "image" && /^data:image\/(png|jpe?g|gif|webp);base64,[a-z0-9+/=]+$/i.test(String(element.src || "")) && String(element.src).length <= 2_500_000
+      ? element.src
+      : "";
+  if (type === "image" && !imageSrc) return null;
 
   return {
     id: cleanText(element.id, 80) || `${Date.now()}-${Math.random().toString(36).slice(2)}`,
@@ -177,6 +196,7 @@ function cleanBoardElement(element) {
     height: Number(element.height) || 0,
     rotation: Number(element.rotation) || 0,
     text: cleanText(element.text, 400),
+    src: imageSrc,
     points,
     stroke: /^#[0-9a-f]{6}$/i.test(String(element.stroke || "")) ? element.stroke : "#f8fafc",
     fill: element.fill === "transparent" || /^#[0-9a-f]{6}$/i.test(String(element.fill || "")) ? element.fill : "transparent",
@@ -213,6 +233,7 @@ async function scheduleEmptyRoomCleanup(roomId) {
       boardSaveTimers.delete(roomId);
       boardStates.delete(roomId);
       boardUsers.delete(roomId);
+      boardEditPermissions.delete(roomId);
       await deleteRoom(roomId);
     } catch (error) {
       console.error(`Empty room cleanup failed for ${roomId}`, error);
@@ -248,6 +269,7 @@ async function leaveCurrentRoom(io, socket) {
   const count = emitParticipants(io, currentRoomId).length;
   if (count === 0) {
     boardUsers.delete(currentRoomId);
+    boardEditPermissions.delete(currentRoomId);
     await scheduleEmptyRoomCleanup(currentRoomId);
     return;
   }
@@ -563,6 +585,7 @@ export function registerSocketHandlers(io) {
 
         ack?.({
           ok: true,
+          canEditBoard: canEditBoard(normalizedRoomId, user),
           board: publicBoardState(normalizedRoomId, { users: boardParticipants(normalizedRoomId) })
         });
         emitBoardUsers(io, normalizedRoomId);
@@ -586,6 +609,10 @@ export function registerSocketHandlers(io) {
         const user = users?.get(socket.id);
         if (!user) {
           ack?.({ ok: false, error: "Not in room" });
+          return;
+        }
+        if (!canEditBoard(normalizedRoomId, user)) {
+          ack?.({ ok: false, error: "You only have view access to this whiteboard" });
           return;
         }
 
@@ -619,6 +646,10 @@ export function registerSocketHandlers(io) {
           ack?.({ ok: false, error: "Not in room" });
           return;
         }
+        if (!canEditBoard(normalizedRoomId, user)) {
+          ack?.({ ok: false, error: "You only have view access to this whiteboard" });
+          return;
+        }
 
         const cleanElement = cleanBoardElement(element);
         if (!cleanElement) {
@@ -646,6 +677,21 @@ export function registerSocketHandlers(io) {
       } catch (error) {
         ack?.({ ok: false, error: "Whiteboard element sync failed" });
       }
+    });
+
+    socket.on("whiteboard:permission", ({ roomId, targetId, canEdit }) => {
+      const normalizedRoomId = String(roomId || socket.data.roomId || "").toUpperCase();
+      const users = rooms.get(normalizedRoomId);
+      const user = users?.get(socket.id);
+      const target = users?.get(String(targetId || ""));
+      if (!user?.host || !target || target.host) return;
+
+      if (!boardEditPermissions.has(normalizedRoomId)) boardEditPermissions.set(normalizedRoomId, new Set());
+      const editors = boardEditPermissions.get(normalizedRoomId);
+      if (canEdit) editors.add(target.id);
+      else editors.delete(target.id);
+      io.to(target.id).emit("whiteboard:permission", { canEditBoard: canEditBoard(normalizedRoomId, target) });
+      emitBoardUsers(io, normalizedRoomId);
     });
 
     socket.on("whiteboard:cursor", ({ roomId, cursor }) => {
