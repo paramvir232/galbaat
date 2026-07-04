@@ -798,7 +798,7 @@ export default function RoomPage() {
 
   return (
     <main className="flex h-dvh min-h-0 flex-col overflow-hidden p-1.5 text-slate-100 sm:p-4">
-      <header className="glass mb-2 flex shrink-0 flex-col gap-2 rounded-lg px-2.5 py-2.5 sm:mb-3 sm:flex-row sm:items-center sm:justify-between sm:gap-3 sm:px-4 sm:py-3">
+      <header className="glass relative z-40 mb-2 flex shrink-0 flex-col gap-2 rounded-lg px-2.5 py-2.5 sm:mb-3 sm:flex-row sm:items-center sm:justify-between sm:gap-3 sm:px-4 sm:py-3">
         <div className="flex w-full min-w-0 flex-1 items-center gap-2 sm:w-auto sm:gap-3">
           <Link to="/" className="grid h-11 w-11 shrink-0 place-items-center rounded-md border border-line bg-white/[0.04] text-slate-300 hover:bg-white/10 sm:h-10 sm:w-10">
             <ArrowLeft className="h-4 w-4" />
@@ -826,7 +826,7 @@ export default function RoomPage() {
             <FileText className="h-4 w-4" />
           </button>
           {isHost && (
-            <div className="relative">
+            <div className="relative z-50">
             <button
               type="button"
               onClick={() => {
@@ -847,7 +847,7 @@ export default function RoomPage() {
               )}
             </button>
             {joinPanelOpen && room?.locked && (
-              <div className="absolute right-0 top-12 z-50 w-72 rounded-lg border border-line bg-panel p-3 shadow-2xl">
+              <div className="absolute right-0 top-12 z-[999] w-72 rounded-lg border border-line bg-panel p-3 shadow-2xl">
                 <div className="mb-3 flex items-center justify-between gap-2">
                   <div>
                     <p className="text-sm font-bold text-slate-100">Waiting to join</p>
