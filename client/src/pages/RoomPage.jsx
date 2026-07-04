@@ -64,6 +64,10 @@ export default function RoomPage() {
   const [settingsName, setSettingsName] = useState("");
   const [settingsError, setSettingsError] = useState("");
   const [whiteboardOpen, setWhiteboardOpen] = useState(false);
+  const [joinRequests, setJoinRequests] = useState([]);
+  const [joinPanelOpen, setJoinPanelOpen] = useState(false);
+  const [lockedJoinPending, setLockedJoinPending] = useState(false);
+  const [joinRetryKey, setJoinRetryKey] = useState(0);
   const speakingRef = useRef(false);
   const micLockedRef = useRef(false);
   const boardMuteRestoreLockRef = useRef(false);
@@ -73,6 +77,9 @@ export default function RoomPage() {
   const participantHandsRef = useRef(new Map());
   const chatResizeRef = useRef(null);
   const optimisticUploadUrlsRef = useRef(new Map());
+  const chatAudioContextRef = useRef(null);
+  const notificationPermissionRequestedRef = useRef(false);
+  const originalTitleRef = useRef(document.title);
 
   const getMaxChatWidth = useCallback(() => {
     if (typeof window === "undefined") return MAX_CHAT_WIDTH;
@@ -184,11 +191,93 @@ export default function RoomPage() {
     window.setTimeout(() => context.close().catch(() => {}), 500);
   }, []);
 
+  const ensureChatAlertReady = useCallback(() => {
+    const AudioContext = window.AudioContext || window.webkitAudioContext;
+    if (AudioContext && !chatAudioContextRef.current) {
+      chatAudioContextRef.current = new AudioContext();
+    }
+    chatAudioContextRef.current?.resume?.().catch(() => {});
+
+    if ("Notification" in window && window.Notification.permission === "default" && !notificationPermissionRequestedRef.current) {
+      notificationPermissionRequestedRef.current = true;
+      window.Notification.requestPermission().catch(() => {});
+    }
+  }, []);
+
+  const playChatAlert = useCallback(() => {
+    const AudioContext = window.AudioContext || window.webkitAudioContext;
+    if (!AudioContext) return;
+    const context = chatAudioContextRef.current || new AudioContext();
+    chatAudioContextRef.current = context;
+    context.resume?.().catch(() => {});
+    const now = context.currentTime;
+
+    [1046, 1318].forEach((frequency, index) => {
+      const oscillator = context.createOscillator();
+      const gain = context.createGain();
+      oscillator.type = "sine";
+      oscillator.frequency.setValueAtTime(frequency, now + index * 0.08);
+      gain.gain.setValueAtTime(0.0001, now + index * 0.08);
+      gain.gain.exponentialRampToValueAtTime(0.12, now + index * 0.08 + 0.015);
+      gain.gain.exponentialRampToValueAtTime(0.0001, now + index * 0.08 + 0.14);
+      oscillator.connect(gain);
+      gain.connect(context.destination);
+      oscillator.start(now + index * 0.08);
+      oscillator.stop(now + index * 0.08 + 0.16);
+    });
+  }, []);
+
+  const notifyIncomingMessage = useCallback((message) => {
+    if (!message || message.username === "System") return;
+    const currentUsername = self?.username || getGuestName();
+    if (message.username === currentUsername) return;
+
+    playChatAlert();
+
+    if (document.hidden) {
+      document.title = `New message from ${message.username} - GalBaat`;
+      if ("Notification" in window && window.Notification.permission === "granted") {
+        const body = message.message || (message.attachments?.length ? "Sent an attachment" : "New message");
+        const notification = new window.Notification(`GalBaat message from ${message.username}`, {
+          body,
+          tag: `galbaat-${roomId}`,
+          icon: "/icon.svg"
+        });
+        notification.onclick = () => {
+          window.focus();
+          setMobilePanel("chat");
+          notification.close();
+        };
+      }
+    }
+  }, [playChatAlert, roomId, self?.username]);
+
+  useEffect(() => {
+    function prepareAlerts() {
+      ensureChatAlertReady();
+    }
+    function handleVisibility() {
+      if (!document.hidden) document.title = originalTitleRef.current;
+    }
+
+    window.addEventListener("pointerdown", prepareAlerts, { once: true });
+    window.addEventListener("keydown", prepareAlerts, { once: true });
+    document.addEventListener("visibilitychange", handleVisibility);
+    return () => {
+      window.removeEventListener("pointerdown", prepareAlerts);
+      window.removeEventListener("keydown", prepareAlerts);
+      document.removeEventListener("visibilitychange", handleVisibility);
+    };
+  }, [ensureChatAlertReady]);
+
   useEffect(() => {
     joinedRef.current = false;
     setSelf(null);
     setParticipants([]);
     setTyping({});
+    setJoinRequests([]);
+    setJoinPanelOpen(false);
+    setLockedJoinPending(false);
 
     async function loadRoom() {
       try {
@@ -213,9 +302,16 @@ export default function RoomPage() {
     socket.emit("room:join", { roomId, username: getGuestName() }, async (ack) => {
       if (!ack?.ok) {
         joinedRef.current = false;
+        if (ack?.pending) {
+          setLockedJoinPending(true);
+          setStatus("waiting");
+          setError("");
+          return;
+        }
         setError(ack?.error || "Unable to join room");
         return;
       }
+      setLockedJoinPending(false);
       setSelf(ack.user);
       setRoom(ack.room);
       setStatus("connected");
@@ -234,7 +330,7 @@ export default function RoomPage() {
         setStatus("voice-limited");
       }
     });
-  }, [connectToPeers, connected, ensureMedia, room, roomId, socket, syncPeers]);
+  }, [connectToPeers, connected, ensureMedia, joinRetryKey, room, roomId, socket, syncPeers]);
 
   useEffect(() => {
     function onConnect() {
@@ -297,6 +393,7 @@ export default function RoomPage() {
         next[optimisticIndex] = message;
         return next;
       });
+      notifyIncomingMessage(message);
       if (mobilePanel !== "chat") setUnreadCount((count) => count + 1);
     }
     function onReaction({ messageId, reactions }) {
@@ -331,6 +428,16 @@ export default function RoomPage() {
       setError("This room has ended.");
       navigate("/");
     }
+    function onJoinRequests(requests = []) {
+      setJoinRequests(requests);
+      if (requests.length) setJoinPanelOpen(true);
+    }
+    function onJoinApproved() {
+      setLockedJoinPending(false);
+      setStatus("joining");
+      joinedRef.current = false;
+      setJoinRetryKey((key) => key + 1);
+    }
 
     socket.on("connect", onConnect);
     socket.on("disconnect", onDisconnect);
@@ -346,6 +453,8 @@ export default function RoomPage() {
     socket.on("host:muted", onMutedByHost);
     socket.on("host:kicked", onKicked);
     socket.on("room:ended", onRoomEnded);
+    socket.on("room:join-requests", onJoinRequests);
+    socket.on("room:join-approved", onJoinApproved);
     setConnected(socket.connected);
 
     return () => {
@@ -363,8 +472,10 @@ export default function RoomPage() {
       socket.off("host:muted", onMutedByHost);
       socket.off("host:kicked", onKicked);
       socket.off("room:ended", onRoomEnded);
+      socket.off("room:join-requests", onJoinRequests);
+      socket.off("room:join-approved", onJoinApproved);
     };
-  }, [mobilePanel, navigate, playHandRaiseAlert, room, self?.id, socket, stopTalking]);
+  }, [mobilePanel, navigate, notifyIncomingMessage, playHandRaiseAlert, room, self?.id, socket, stopTalking]);
 
   useEffect(() => {
     if (mobilePanel === "chat") setUnreadCount(0);
@@ -451,6 +562,15 @@ export default function RoomPage() {
 
   function toggleLock() {
     socket.emit("room:lock", { roomId, locked: !room?.locked });
+  }
+
+  function allowJoinRequest(requestId) {
+    socket.emit("room:join-allow", { roomId, requestId });
+  }
+
+  function unlockRoomFromRequests() {
+    socket.emit("room:lock", { roomId, locked: false });
+    setJoinPanelOpen(false);
   }
 
   function endRoom() {
@@ -694,7 +814,7 @@ export default function RoomPage() {
 
         <div className="flex w-full flex-wrap items-center justify-between gap-1.5 sm:w-auto sm:justify-end sm:gap-2">
           <StatusPill tone={statusTone}>
-            {status === "connected" ? "Connected" : status === "voice-limited" ? "Chat connected" : "Reconnecting"}
+            {status === "connected" ? "Connected" : status === "voice-limited" ? "Chat connected" : status === "waiting" ? "Waiting" : "Reconnecting"}
           </StatusPill>
           <ShareRoom roomId={roomId} />
           <button
@@ -706,14 +826,61 @@ export default function RoomPage() {
             <FileText className="h-4 w-4" />
           </button>
           {isHost && (
+            <div className="relative">
             <button
               type="button"
-              onClick={toggleLock}
+              onClick={() => {
+                if (room?.locked && joinRequests.length) {
+                  setJoinPanelOpen((open) => !open);
+                  return;
+                }
+                toggleLock();
+              }}
               title={room?.locked ? "Unlock room" : "Lock room"}
-              className="grid h-11 w-11 place-items-center rounded-md border border-line bg-white/[0.05] text-slate-200 hover:bg-white/10 sm:h-10 sm:w-10"
+              className="relative grid h-11 w-11 place-items-center rounded-md border border-line bg-white/[0.05] text-slate-200 hover:bg-white/10 sm:h-10 sm:w-10"
             >
               {room?.locked ? <Lock className="h-4 w-4 text-amberglow" /> : <Unlock className="h-4 w-4" />}
+              {joinRequests.length > 0 && (
+                <span className="absolute -right-1 -top-1 grid h-5 min-w-5 place-items-center rounded-full border border-ink bg-red-500 px-1 text-[10px] font-black text-white">
+                  {joinRequests.length}
+                </span>
+              )}
             </button>
+            {joinPanelOpen && room?.locked && (
+              <div className="absolute right-0 top-12 z-50 w-72 rounded-lg border border-line bg-panel p-3 shadow-2xl">
+                <div className="mb-3 flex items-center justify-between gap-2">
+                  <div>
+                    <p className="text-sm font-bold text-slate-100">Waiting to join</p>
+                    <p className="text-xs text-slate-400">{joinRequests.length || "No"} pending request{joinRequests.length === 1 ? "" : "s"}</p>
+                  </div>
+                  <button type="button" onClick={() => setJoinPanelOpen(false)} className="grid h-8 w-8 place-items-center rounded-md text-slate-400 hover:bg-white/10 hover:text-slate-100">
+                    <X className="h-4 w-4" />
+                  </button>
+                </div>
+                <button type="button" onClick={unlockRoomFromRequests} className="mb-3 min-h-10 w-full rounded-md border border-mint/40 bg-mint/10 px-3 text-sm font-bold text-mint hover:bg-mint/15">
+                  Unlock room for everyone
+                </button>
+                <div className="max-h-64 space-y-2 overflow-y-auto">
+                  {joinRequests.length ? joinRequests.map((request) => (
+                    <div key={request.id} className="flex items-center gap-2 rounded-md border border-line bg-ink/50 p-2">
+                      <div className="grid h-9 w-9 shrink-0 place-items-center rounded-md bg-white/[0.06] text-xs font-black text-slate-100">
+                        {request.username?.slice(0, 2).toUpperCase()}
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-sm font-semibold text-slate-100">{request.username}</p>
+                        <p className="text-xs text-slate-500">Requesting access</p>
+                      </div>
+                      <button type="button" onClick={() => allowJoinRequest(request.id)} className="min-h-9 rounded-md bg-mint px-3 text-xs font-black text-ink hover:bg-mint/90">
+                        Allow
+                      </button>
+                    </div>
+                  )) : (
+                    <p className="rounded-md border border-dashed border-line px-3 py-2 text-xs text-slate-500">No one is waiting right now.</p>
+                  )}
+                </div>
+              </div>
+            )}
+            </div>
           )}
           <button
             type="button"
@@ -737,6 +904,26 @@ export default function RoomPage() {
         </div>
       </header>
 
+      {lockedJoinPending ? (
+        <section className="grid min-h-0 flex-1 place-items-center rounded-lg border border-line bg-panel/80 p-6 text-center shadow-2xl">
+          <div className="w-full max-w-md rounded-lg border border-line bg-ink/60 p-6">
+            <div className="mx-auto mb-4 grid h-14 w-14 place-items-center rounded-full border border-amberglow/40 bg-amberglow/10 text-amberglow">
+              <Lock className="h-6 w-6" />
+            </div>
+            <h2 className="text-xl font-black text-slate-100">Room is locked</h2>
+            <p className="mt-2 text-sm leading-6 text-slate-400">
+              Waiting for the room admin to allow you in. You will join automatically when approved.
+            </p>
+            <div className="mt-5 inline-flex items-center gap-2 rounded-full border border-line bg-white/[0.04] px-4 py-2 text-sm text-slate-300">
+              <Loader2 className="h-4 w-4 animate-spin text-mint" />
+              Waiting for admin permission
+            </div>
+            <Link to="/" className="mt-5 inline-flex min-h-10 items-center justify-center rounded-md border border-line bg-white/[0.04] px-4 text-sm font-semibold text-slate-200 hover:bg-white/10">
+              Leave room
+            </Link>
+          </div>
+        </section>
+      ) : (
       <section className="relative grid min-h-0 flex-1 gap-2 overflow-hidden lg:grid" style={desktopLayout ? { gridTemplateColumns: desktopGridColumns } : undefined}>
         {participantsCollapsed && (
           <button
@@ -868,6 +1055,7 @@ export default function RoomPage() {
           />
         </div>
       </section>
+      )}
 
       {settingsOpen && (
         <div className="fixed inset-0 z-50 grid place-items-center bg-ink/70 p-4 backdrop-blur-sm">

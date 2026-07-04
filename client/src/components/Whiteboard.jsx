@@ -302,9 +302,20 @@ export default function Whiteboard({ open, roomId, socket, currentUser, particip
   function emitElement(element, action = "upsert", immediate = false) {
     if (!open || !element) return;
     const now = Date.now();
-    if (!immediate && now - lastElementSyncRef.current < 28) return;
+    if (!immediate && now - lastElementSyncRef.current < 16) return;
     lastElementSyncRef.current = now;
     socket.emit("whiteboard:element", { roomId, action, element });
+  }
+
+  function syncElementDiff(fromElements, toElements) {
+    const fromMap = new Map(fromElements.map((element) => [element.id, element]));
+    const toMap = new Map(toElements.map((element) => [element.id, element]));
+    fromMap.forEach((element, id) => {
+      if (!toMap.has(id)) emitElement(element, "delete", true);
+    });
+    toMap.forEach((element, id) => {
+      if (JSON.stringify(fromMap.get(id)) !== JSON.stringify(element)) emitElement(element, "upsert", true);
+    });
   }
 
   useEffect(() => {
@@ -575,10 +586,10 @@ export default function Whiteboard({ open, roomId, socket, currentUser, particip
     setHistory((current) => {
       if (!current.length) return current;
       const previous = current[current.length - 1];
+      const currentElements = cloneElements(elementsRef.current);
       setRedoStack((redo) => [cloneElements(elementsRef.current), ...redo.slice(0, 30)]);
-      setElements(previous);
-      elementsRef.current = previous;
-      emitBoard(previous);
+      applyElements(previous);
+      syncElementDiff(currentElements, previous);
       return current.slice(0, -1);
     });
   }
@@ -587,17 +598,23 @@ export default function Whiteboard({ open, roomId, socket, currentUser, particip
     setRedoStack((current) => {
       if (!current.length) return current;
       const next = current[0];
+      const currentElements = cloneElements(elementsRef.current);
       setHistory((past) => [...past.slice(-30), cloneElements(elementsRef.current)]);
-      setElements(next);
-      elementsRef.current = next;
-      emitBoard(next);
+      applyElements(next);
+      syncElementDiff(currentElements, next);
       return current.slice(1);
     });
   }
 
   function removeSelected() {
     if (!selectedIds.length) return;
-    commitElements(elementsRef.current.filter((element) => !selectedIds.includes(element.id)));
+    const previous = cloneElements(elementsRef.current);
+    const removed = elementsRef.current.filter((element) => selectedIds.includes(element.id));
+    const next = elementsRef.current.filter((element) => !selectedIds.includes(element.id));
+    applyElements(next);
+    setHistory((current) => [...current.slice(-30), previous]);
+    setRedoStack([]);
+    removed.forEach((element) => emitElement(element, "delete", true));
     updateSelection([]);
   }
 
@@ -609,7 +626,7 @@ export default function Whiteboard({ open, roomId, socket, currentUser, particip
     setSelectedIds([]);
     setHistory((current) => [...current.slice(-30), previous]);
     setRedoStack([]);
-    socket.emit("whiteboard:update", { roomId, board: { elements: [], background: backgroundRef.current } });
+    socket.emit("whiteboard:update", { roomId, board: { elements: [], background: backgroundRef.current, clear: true } });
   }
 
   function copySelected() {

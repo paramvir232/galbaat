@@ -9,10 +9,34 @@ import { cleanText, cleanUsername } from "../utils/sanitize.js";
 const rooms = new Map();
 const emptyRoomTimers = new Map();
 const boardUsers = new Map();
+const boardStates = new Map();
+const boardSaveTimers = new Map();
+const joinRequests = new Map();
+const approvedJoinSockets = new Map();
 
 function roomUsers(roomId) {
   if (!rooms.has(roomId)) rooms.set(roomId, new Map());
   return rooms.get(roomId);
+}
+
+function roomJoinRequests(roomId) {
+  if (!joinRequests.has(roomId)) joinRequests.set(roomId, new Map());
+  return joinRequests.get(roomId);
+}
+
+function publicJoinRequest(request) {
+  return {
+    id: request.id,
+    username: request.username,
+    requestedAt: request.requestedAt
+  };
+}
+
+function emitJoinRequests(io, roomId) {
+  const requests = [...roomJoinRequests(roomId).values()].map(publicJoinRequest);
+  const hosts = [...roomUsers(roomId).values()].filter((user) => user.host);
+  hosts.forEach((host) => io.to(host.id).emit("room:join-requests", requests));
+  return requests;
 }
 
 function publicUser(user) {
@@ -48,6 +72,71 @@ function emitBoardUsers(io, roomId) {
   io.to(roomId).emit("whiteboard:users", boardParticipants(roomId));
 }
 
+function roomBoardState(roomId) {
+  if (!boardStates.has(roomId)) {
+    boardStates.set(roomId, {
+      elements: new Map(),
+      background: "#0f172a",
+      version: 0,
+      loaded: false
+    });
+  }
+  return boardStates.get(roomId);
+}
+
+async function loadBoardState(roomId) {
+  const state = roomBoardState(roomId);
+  if (state.loaded) return state;
+
+  const board = await Board.findOneAndUpdate(
+    { roomId },
+    { $setOnInsert: { roomId, elements: [], background: "#0f172a", version: 0 } },
+    { new: true, upsert: true }
+  ).lean();
+
+  state.elements = new Map((board.elements || []).map((element) => [element.id, element]));
+  state.background = board.background || "#0f172a";
+  state.version = board.version || 0;
+  state.loaded = true;
+  return state;
+}
+
+function publicBoardState(roomId, extra = {}) {
+  const state = roomBoardState(roomId);
+  return {
+    roomId,
+    elements: [...state.elements.values()],
+    background: state.background,
+    version: state.version,
+    ...extra
+  };
+}
+
+function scheduleBoardSave(roomId) {
+  clearTimeout(boardSaveTimers.get(roomId));
+  const timer = setTimeout(async () => {
+    const state = roomBoardState(roomId);
+    try {
+      await Board.findOneAndUpdate(
+        { roomId },
+        {
+          $set: {
+            elements: [...state.elements.values()].slice(-1600),
+            background: state.background,
+            version: state.version
+          }
+        },
+        { upsert: true }
+      );
+    } catch (error) {
+      console.error(`Whiteboard save failed for ${roomId}`, error);
+    } finally {
+      boardSaveTimers.delete(roomId);
+    }
+  }, 500);
+  boardSaveTimers.set(roomId, timer);
+}
+
 function reactionCounts(reactions = {}) {
   const entries = reactions instanceof Map ? [...reactions.entries()] : Object.entries(reactions);
   return Object.fromEntries(entries.map(([emoji, users]) => [emoji, Array.isArray(users) ? users.length : Number(users) || 0]));
@@ -75,7 +164,7 @@ function cleanBoardElement(element) {
 
   const points = Array.isArray(element.points)
     ? element.points
-        .slice(0, 2000)
+        .slice(0, 20000)
         .map((point) => [Number(point?.[0]) || 0, Number(point?.[1]) || 0])
     : undefined;
 
@@ -120,6 +209,10 @@ async function scheduleEmptyRoomCleanup(roomId) {
 
       rooms.delete(roomId);
       emptyRoomTimers.delete(roomId);
+      clearTimeout(boardSaveTimers.get(roomId));
+      boardSaveTimers.delete(roomId);
+      boardStates.delete(roomId);
+      boardUsers.delete(roomId);
       await deleteRoom(roomId);
     } catch (error) {
       console.error(`Empty room cleanup failed for ${roomId}`, error);
@@ -131,7 +224,14 @@ async function scheduleEmptyRoomCleanup(roomId) {
 
 async function leaveCurrentRoom(io, socket) {
   const currentRoomId = socket.data.roomId;
-  if (!currentRoomId || !rooms.has(currentRoomId)) return;
+  if (!currentRoomId || !rooms.has(currentRoomId)) {
+    const pendingRoomId = socket.data.pendingRoomId;
+    if (pendingRoomId) {
+      roomJoinRequests(pendingRoomId).delete(socket.id);
+      emitJoinRequests(io, pendingRoomId);
+    }
+    return;
+  }
 
   const users = rooms.get(currentRoomId);
   const user = users.get(socket.id);
@@ -147,6 +247,7 @@ async function leaveCurrentRoom(io, socket) {
   socket.to(currentRoomId).emit("webrtc:peer-left", { id: socket.id });
   const count = emitParticipants(io, currentRoomId).length;
   if (count === 0) {
+    boardUsers.delete(currentRoomId);
     await scheduleEmptyRoomCleanup(currentRoomId);
     return;
   }
@@ -167,8 +268,23 @@ export function registerSocketHandlers(io) {
 
         const users = roomUsers(normalizedRoomId);
         if (room.locked && users.size > 0 && !users.has(socket.id)) {
-          ack?.({ ok: false, error: "Room is locked" });
-          return;
+          const approvedSockets = approvedJoinSockets.get(normalizedRoomId);
+          if (!approvedSockets?.has(socket.id)) {
+            const usernameClean = cleanUsername(username);
+            const request = {
+              id: socket.id,
+              socketId: socket.id,
+              username: usernameClean,
+              requestedAt: new Date().toISOString()
+            };
+            roomJoinRequests(normalizedRoomId).set(socket.id, request);
+            socket.data.pendingRoomId = normalizedRoomId;
+            socket.data.pendingUsername = usernameClean;
+            ack?.({ ok: false, pending: true, error: "Room is locked. Waiting for admin permission." });
+            emitJoinRequests(io, normalizedRoomId);
+            return;
+          }
+          approvedSockets.delete(socket.id);
         }
         cancelEmptyRoomCleanup(normalizedRoomId);
         const existingUser = users.get(socket.id);
@@ -201,8 +317,12 @@ export function registerSocketHandlers(io) {
 
         socket.data.roomId = normalizedRoomId;
         socket.data.username = user.username;
+        socket.data.pendingRoomId = null;
+        socket.data.pendingUsername = null;
         socket.join(normalizedRoomId);
         users.set(socket.id, user);
+        roomJoinRequests(normalizedRoomId).delete(socket.id);
+        emitJoinRequests(io, normalizedRoomId);
 
         const existingPeers = [...users.values()]
           .filter((participant) => participant.id !== socket.id)
@@ -439,21 +559,11 @@ export function registerSocketHandlers(io) {
 
         if (!boardUsers.has(normalizedRoomId)) boardUsers.set(normalizedRoomId, new Set());
         boardUsers.get(normalizedRoomId).add(socket.id);
-        const board = await Board.findOneAndUpdate(
-          { roomId: normalizedRoomId },
-          { $setOnInsert: { roomId: normalizedRoomId, elements: [], background: "#0f172a", version: 0 } },
-          { new: true, upsert: true }
-        ).lean();
+        await loadBoardState(normalizedRoomId);
 
         ack?.({
           ok: true,
-          board: {
-            roomId: normalizedRoomId,
-            elements: board.elements || [],
-            background: board.background || "#0f172a",
-            version: board.version || 0,
-            users: boardParticipants(normalizedRoomId)
-          }
+          board: publicBoardState(normalizedRoomId, { users: boardParticipants(normalizedRoomId) })
         });
         emitBoardUsers(io, normalizedRoomId);
       } catch (error) {
@@ -479,39 +589,21 @@ export function registerSocketHandlers(io) {
           return;
         }
 
+        await loadBoardState(normalizedRoomId);
         const cleanState = cleanBoardState(board);
-        const existing = await Board.findOne({ roomId: normalizedRoomId }).lean();
-        const existingElements = existing?.elements || [];
-        const nextElements =
-          cleanState.elements.length >= existingElements.length
-            ? [
-                ...new Map(
-                  [...existingElements, ...cleanState.elements].map((element) => [element.id, element])
-                ).values()
-              ].slice(-1200)
-            : cleanState.elements;
-        const saved = await Board.findOneAndUpdate(
-          { roomId: normalizedRoomId },
-          {
-            $set: {
-              elements: nextElements,
-              background: cleanState.background
-            },
-            $inc: { version: 1 }
-          },
-          { new: true, upsert: true }
-        ).lean();
+        const state = roomBoardState(normalizedRoomId);
+        state.background = cleanState.background;
+        if (board?.clear || cleanState.elements.length === 0) {
+          state.elements.clear();
+        } else {
+          cleanState.elements.forEach((element) => state.elements.set(element.id, element));
+        }
+        state.version += 1;
+        const payload = publicBoardState(normalizedRoomId, { updatedBy: socket.id });
 
-        const payload = {
-          roomId: normalizedRoomId,
-          elements: saved.elements || [],
-          background: saved.background || "#0f172a",
-          version: saved.version || 0,
-          updatedBy: socket.id
-        };
-
-        socket.to(normalizedRoomId).emit("whiteboard:update", payload);
+        io.to(normalizedRoomId).emit("whiteboard:update", payload);
         ack?.({ ok: true, board: payload });
+        scheduleBoardSave(normalizedRoomId);
         touchRoom(normalizedRoomId, users.size).catch(() => {});
       } catch (error) {
         ack?.({ ok: false, error: "Whiteboard save failed" });
@@ -534,29 +626,22 @@ export function registerSocketHandlers(io) {
           return;
         }
 
-        const board = await Board.findOneAndUpdate(
-          { roomId: normalizedRoomId },
-          { $setOnInsert: { roomId: normalizedRoomId, elements: [], background: "#0f172a", version: 0 } },
-          { new: true, upsert: true }
-        );
-        const current = new Map((board.elements || []).map((item) => [item.id, item.toObject ? item.toObject() : item]));
-
-        if (action === "delete") current.delete(cleanElement.id);
-        else current.set(cleanElement.id, cleanElement);
-
-        board.elements = [...current.values()].slice(-1200);
-        board.version += 1;
-        await board.save();
+        await loadBoardState(normalizedRoomId);
+        const state = roomBoardState(normalizedRoomId);
+        if (action === "delete") state.elements.delete(cleanElement.id);
+        else state.elements.set(cleanElement.id, cleanElement);
+        state.version += 1;
 
         const payload = {
           action: action === "delete" ? "delete" : "upsert",
           element: cleanElement,
-          version: board.version,
+          version: state.version,
           updatedBy: socket.id
         };
 
-        socket.to(normalizedRoomId).emit("whiteboard:element", payload);
+        io.to(normalizedRoomId).emit("whiteboard:element", payload);
         ack?.({ ok: true, ...payload });
+        scheduleBoardSave(normalizedRoomId);
         touchRoom(normalizedRoomId, users.size).catch(() => {});
       } catch (error) {
         ack?.({ ok: false, error: "Whiteboard element sync failed" });
@@ -603,7 +688,29 @@ export function registerSocketHandlers(io) {
       if (!user?.host) return;
       const nextLocked = Boolean(locked);
       await Room.updateOne({ roomId: normalizedRoomId }, { $set: { locked: nextLocked } });
+      if (!nextLocked) {
+        const requests = roomJoinRequests(normalizedRoomId);
+        requests.forEach((request) => io.to(request.socketId).emit("room:join-approved", { roomId: normalizedRoomId, unlocked: true }));
+        requests.clear();
+        emitJoinRequests(io, normalizedRoomId);
+      }
       io.to(normalizedRoomId).emit("room:lock", { locked: nextLocked });
+    });
+
+    socket.on("room:join-allow", ({ roomId, requestId }) => {
+      const normalizedRoomId = String(roomId || socket.data.roomId || "").toUpperCase();
+      const host = rooms.get(normalizedRoomId)?.get(socket.id);
+      if (!host?.host) return;
+
+      const requests = roomJoinRequests(normalizedRoomId);
+      const request = requests.get(requestId);
+      if (!request) return;
+
+      if (!approvedJoinSockets.has(normalizedRoomId)) approvedJoinSockets.set(normalizedRoomId, new Set());
+      approvedJoinSockets.get(normalizedRoomId).add(request.socketId);
+      requests.delete(requestId);
+      io.to(request.socketId).emit("room:join-approved", { roomId: normalizedRoomId });
+      emitJoinRequests(io, normalizedRoomId);
     });
 
     socket.on("room:end", async ({ roomId }) => {
@@ -613,6 +720,8 @@ export function registerSocketHandlers(io) {
       io.to(normalizedRoomId).emit("room:ended");
       await deleteRoom(normalizedRoomId);
       rooms.delete(normalizedRoomId);
+      joinRequests.delete(normalizedRoomId);
+      approvedJoinSockets.delete(normalizedRoomId);
     });
 
     socket.on("host:mute", ({ roomId, targetId, muted }) => {
