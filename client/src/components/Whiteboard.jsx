@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  ArrowRight,
   ChevronLeft,
   ChevronRight,
   Circle,
@@ -48,6 +47,7 @@ const TOOLS = [
 ];
 
 const COLORS = ["#f8fafc", "#29d3a7", "#8ab4ff", "#f59e0b", "#fb7185", "#a78bfa", "#22d3ee", "#111827"];
+const PEN_CURSOR = `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='18' height='18' viewBox='0 0 18 18'%3E%3Ccircle cx='9' cy='9' r='4' fill='%2329d3a7' stroke='%2308111f' stroke-width='2'/%3E%3C/svg%3E") 9 9, crosshair`;
 
 function makeId() {
   return `wb-${Date.now()}-${Math.random().toString(36).slice(2)}`;
@@ -85,6 +85,19 @@ function hitElement(element, point) {
   const bounds = elementBounds(element);
   const padding = Math.max(8, element.strokeWidth || 4);
   return point.x >= bounds.x - padding && point.x <= bounds.x + bounds.width + padding && point.y >= bounds.y - padding && point.y <= bounds.y + bounds.height + padding;
+}
+
+function boundsIntersect(first, second) {
+  return first.x <= second.x + second.width && first.x + first.width >= second.x && first.y <= second.y + second.height && first.y + first.height >= second.y;
+}
+
+function rectFromPoints(start, end) {
+  return {
+    x: Math.min(start.x, end.x),
+    y: Math.min(start.y, end.y),
+    width: Math.abs(end.x - start.x),
+    height: Math.abs(end.y - start.y)
+  };
 }
 
 function moveElement(element, dx, dy) {
@@ -213,7 +226,7 @@ function cursorForTool(tool, isDragging, canEdit) {
   if (tool === "select") return "default";
   if (tool === "text") return "text";
   if (tool === "eraser") return "cell";
-  if (tool === "pen" || tool === "highlighter") return "crosshair";
+  if (tool === "pen" || tool === "highlighter") return PEN_CURSOR;
   return "crosshair";
 }
 
@@ -268,7 +281,7 @@ function elementToSvg(element) {
     return `<text x="${element.x}" y="${element.y + 24}"${rotate} fill="${escapeHtml(element.stroke)}" opacity="${element.opacity}" font-size="${Math.max(16, element.strokeWidth * 5)}" font-weight="700">${escapeHtml(element.text)}</text>`;
   }
   if (element.type === "image" && element.src) {
-    return `<image href="${escapeAttribute(element.src)}" x="${bounds.x}" y="${bounds.y}" width="${bounds.width}" height="${bounds.height}"${rotate} opacity="${element.opacity || 1}" preserveAspectRatio="xMidYMid meet" />`;
+    return `<image href="${escapeAttribute(element.src)}" xlink:href="${escapeAttribute(element.src)}" x="${bounds.x}" y="${bounds.y}" width="${bounds.width}" height="${bounds.height}"${rotate} opacity="${element.opacity || 1}" preserveAspectRatio="xMidYMid meet" />`;
   }
   return "";
 }
@@ -302,6 +315,7 @@ export default function Whiteboard({ open, roomId, socket, currentUser, particip
   const [canEditBoard, setCanEditBoard] = useState(Boolean(currentUser?.host));
   const [openVolumeId, setOpenVolumeId] = useState(null);
   const [isDragging, setIsDragging] = useState(false);
+  const [marquee, setMarquee] = useState(null);
 
   const selectedElement = useMemo(() => elements.find((element) => element.id === selectedIds[0]), [elements, selectedIds]);
   const boardCursor = useMemo(() => cursorForTool(tool, isDragging, canEditBoard), [canEditBoard, isDragging, tool]);
@@ -401,13 +415,15 @@ export default function Whiteboard({ open, roomId, socket, currentUser, particip
     function onElementUpdate({ action, element }) {
       if (!element?.id) return;
       if (dragRef.current?.id === element.id) return;
+      const existing = elementsRef.current.find((item) => item.id === element.id);
+      if (existing?.points?.length && element.points?.length && element.points.length < existing.points.length) return;
       if (action === "delete") {
         applyElements(elementsRef.current.filter((item) => item.id !== element.id));
         setSelectedIds((current) => current.filter((id) => id !== element.id));
         return;
       }
       applyElements(
-        elementsRef.current.some((item) => item.id === element.id)
+        existing
           ? elementsRef.current.map((item) => (item.id === element.id ? element : item))
           : [...elementsRef.current, element]
       );
@@ -526,7 +542,8 @@ export default function Whiteboard({ open, roomId, socket, currentUser, particip
       const hit = hitTest(point);
       if (!hit) {
         updateSelection([]);
-        dragRef.current = null;
+        setMarquee({ start: point, current: point });
+        dragRef.current = { mode: "marquee", start: point };
         return;
       }
       updateSelection([hit.id]);
@@ -603,6 +620,11 @@ export default function Whiteboard({ open, roomId, socket, currentUser, particip
       return;
     }
 
+    if (drag.mode === "marquee") {
+      setMarquee({ start: drag.start, current: point });
+      return;
+    }
+
     const next = elementsRef.current.map((element) => {
       if (element.id !== drag.id) return element;
       if (drag.mode === "move") return moveElement(element, point.x - drag.start.x, point.y - drag.start.y);
@@ -626,6 +648,15 @@ export default function Whiteboard({ open, roomId, socket, currentUser, particip
     setIsDragging(false);
     const drag = dragRef.current;
     if (!drag || drag.mode === "pan") {
+      setMarquee(null);
+      dragRef.current = null;
+      return;
+    }
+    if (drag.mode === "marquee") {
+      const area = rectFromPoints(drag.start, marquee?.current || drag.start);
+      const selected = elementsRef.current.filter((element) => boundsIntersect(elementBounds(element), area)).map((element) => element.id);
+      updateSelection(selected);
+      setMarquee(null);
       dragRef.current = null;
       return;
     }
@@ -698,9 +729,23 @@ export default function Whiteboard({ open, roomId, socket, currentUser, particip
     updateSelection(pasted.map((element) => element.id));
   }
 
+  function duplicateSelected() {
+    if (!canEditBoard || !selectedIds.length) return;
+    const duplicated = cloneElements(elementsRef.current.filter((element) => selectedIds.includes(element.id))).map((element) => ({
+      ...element,
+      id: makeId(),
+      x: element.x + 24,
+      y: element.y + 24,
+      points: element.points?.map((point) => [point[0] + 24, point[1] + 24])
+    }));
+    if (!duplicated.length) return;
+    commitElements([...elementsRef.current, ...duplicated]);
+    updateSelection(duplicated.map((element) => element.id));
+  }
+
   function rotateSelected() {
     if (!canEditBoard || !selectedIds.length) return;
-    commitElements(elementsRef.current.map((element) => (selectedIds.includes(element.id) ? { ...element, rotation: normalizeAngle((element.rotation || 0) + 15) } : element)));
+    commitElements(elementsRef.current.map((element) => (selectedIds.includes(element.id) ? { ...element, rotation: normalizeAngle((element.rotation || 0) - 15) } : element)));
   }
 
   async function addImageFromFile(file) {
@@ -749,7 +794,10 @@ export default function Whiteboard({ open, roomId, socket, currentUser, particip
       if (event.target instanceof Element && event.target.matches("input, textarea")) return;
       const key = event.key.toLowerCase();
       if (event.ctrlKey || event.metaKey) {
-        if (key === "z") {
+        if (key === "z" && event.shiftKey) {
+          event.preventDefault();
+          redo();
+        } else if (key === "z") {
           event.preventDefault();
           undo();
         } else if (key === "y") {
@@ -758,9 +806,6 @@ export default function Whiteboard({ open, roomId, socket, currentUser, particip
         } else if (key === "c") {
           event.preventDefault();
           copySelected();
-        } else if (key === "v") {
-          event.preventDefault();
-          pasteSelected();
         }
         return;
       }
@@ -771,8 +816,16 @@ export default function Whiteboard({ open, roomId, socket, currentUser, particip
     }
     function handlePaste(event) {
       if (!canEditBoard) return;
-      const imageFile = [...(event.clipboardData?.files || [])].find((file) => file.type.startsWith("image/"));
-      if (!imageFile) return;
+      const imageFile =
+        [...(event.clipboardData?.files || [])].find((file) => file.type.startsWith("image/")) ||
+        [...(event.clipboardData?.items || [])].find((item) => item.type.startsWith("image/"))?.getAsFile();
+      if (!imageFile) {
+        if (clipboardRef.current.length) {
+          event.preventDefault();
+          pasteSelected();
+        }
+        return;
+      }
       event.preventDefault();
       addImageFromFile(imageFile).catch(() => setError("Could not paste that image on the whiteboard."));
     }
@@ -793,7 +846,8 @@ export default function Whiteboard({ open, roomId, socket, currentUser, particip
     const markup = elementsRef.current.map(elementToSvg).join("\n      ");
     return {
       bounds,
-      svg: `<svg xmlns="http://www.w3.org/2000/svg" width="${Math.round(bounds.width)}" height="${Math.round(bounds.height)}" viewBox="${bounds.x} ${bounds.y} ${bounds.width} ${bounds.height}">
+      svg: `<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="${Math.round(bounds.width)}" height="${Math.round(bounds.height)}" viewBox="${bounds.x} ${bounds.y} ${bounds.width} ${bounds.height}">
   <rect x="${bounds.x}" y="${bounds.y}" width="${bounds.width}" height="${bounds.height}" fill="${escapeHtml(backgroundRef.current)}" />
   <g>
       ${markup}
@@ -807,10 +861,17 @@ export default function Whiteboard({ open, roomId, socket, currentUser, particip
     const link = document.createElement("a");
     link.href = url;
     link.download = filename;
+    link.rel = "noopener";
     document.body.appendChild(link);
     link.click();
-    link.remove();
-    window.setTimeout(() => window.URL.revokeObjectURL(url), 1000);
+    window.setTimeout(() => {
+      link.remove();
+      window.URL.revokeObjectURL(url);
+    }, 1000);
+  }
+
+  function downloadText(content, filename, mimeType) {
+    downloadBlob(new window.Blob([content], { type: mimeType }), filename);
   }
 
   async function downloadAsImage() {
@@ -841,7 +902,7 @@ export default function Whiteboard({ open, roomId, socket, currentUser, particip
   function downloadAsSvg() {
     setExportMenuOpen(false);
     const { svg } = exportSvgMarkup();
-    downloadBlob(new window.Blob([svg], { type: "image/svg+xml;charset=utf-8" }), `galbaat-whiteboard-${roomId}.svg`);
+    downloadText(svg, `galbaat-whiteboard-${roomId}.svg`, "image/svg+xml;charset=utf-8");
   }
 
   function downloadAsHtml() {
@@ -870,7 +931,7 @@ export default function Whiteboard({ open, roomId, socket, currentUser, particip
   <main>${svg}</main>
 </body>
 </html>`;
-    downloadBlob(new window.Blob([html], { type: "text/html;charset=utf-8" }), `galbaat-whiteboard-${roomId}.html`);
+    downloadText(html, `galbaat-whiteboard-${roomId}.html`, "text/html;charset=utf-8");
   }
 
   function renderElement(element) {
@@ -919,7 +980,16 @@ export default function Whiteboard({ open, roomId, socket, currentUser, particip
   }
 
   if (!open) return null;
-  const boardVoiceUsers = boardUsers.map((user) => ({ ...(participants.find((participant) => participant.id === user.id) || {}), ...user }));
+  const boardVoiceUsers = boardUsers
+    .map((user) => {
+      const participant = participants.find((item) => item.id === user.id);
+      return { ...user, ...(participant || {}), canEditBoard: user.canEditBoard };
+    })
+    .sort((first, second) => {
+      if (first.id === currentUser?.id) return -1;
+      if (second.id === currentUser?.id) return 1;
+      return new Date(first.joinedAt || 0).getTime() - new Date(second.joinedAt || 0).getTime();
+    });
   const currentBoardUser = boardVoiceUsers.find((user) => user.id === currentUser?.id) || currentUser;
 
   return (
@@ -948,7 +1018,7 @@ export default function Whiteboard({ open, roomId, socket, currentUser, particip
           <span className="mx-1 hidden h-7 w-px bg-line sm:block" />
           <button type="button" onClick={undo} disabled={!canEditBoard} title="Undo (Ctrl+Z)" className="grid h-9 w-9 place-items-center rounded-md text-slate-300 hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-40"><Undo2 className="h-4 w-4" /></button>
           <button type="button" onClick={redo} disabled={!canEditBoard} title="Redo (Ctrl+Y)" className="grid h-9 w-9 place-items-center rounded-md text-slate-300 hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-40"><Redo2 className="h-4 w-4" /></button>
-          <button type="button" onClick={copySelected} title="Copy (Ctrl+C)" className="grid h-9 w-9 place-items-center rounded-md text-slate-300 hover:bg-white/10"><Copy className="h-4 w-4" /></button>
+          <button type="button" onClick={duplicateSelected} disabled={!canEditBoard} title="Duplicate selected" className="grid h-9 w-9 place-items-center rounded-md text-slate-300 hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-40"><Copy className="h-4 w-4" /></button>
           <button type="button" onClick={removeSelected} disabled={!canEditBoard} title="Delete" className="grid h-9 w-9 place-items-center rounded-md text-slate-300 hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-40"><Trash2 className="h-4 w-4" /></button>
           <button type="button" onClick={rotateSelected} disabled={!canEditBoard} title="Rotate (R)" className="grid h-9 w-9 place-items-center rounded-md text-slate-300 hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-40"><RotateCw className="h-4 w-4" /></button>
           <button type="button" onClick={clearBoard} disabled={!canEditBoard} title="Clear board" className="inline-flex h-9 items-center gap-2 rounded-md border border-red-400/30 bg-red-500/10 px-3 text-xs font-bold text-red-100 hover:bg-red-500/20 disabled:cursor-not-allowed disabled:opacity-40">
@@ -1076,7 +1146,7 @@ export default function Whiteboard({ open, roomId, socket, currentUser, particip
                 <Users className="h-4 w-4" />
                 On board
               </div>
-              <div className="space-y-2">
+              <div className="scrollbar-thin max-h-64 space-y-2 overflow-y-auto pr-1">
                 {boardVoiceUsers.length ? boardVoiceUsers.map((user) => (
                   <div key={user.id} className="rounded-lg border border-line bg-ink/50 p-2">
                     <div className="flex items-center gap-2">
@@ -1191,11 +1261,15 @@ export default function Whiteboard({ open, roomId, socket, currentUser, particip
                 return <rect key={`${selection.id}-${id}`} x={bounds.x - 8} y={bounds.y - 8} width={bounds.width + 16} height={bounds.height + 16} fill="none" stroke={selection.color || "#8ab4ff"} strokeDasharray="4 6" vectorEffect="non-scaling-stroke" />;
               })
             )}
+            {marquee && (() => {
+              const area = rectFromPoints(marquee.start, marquee.current);
+              return <rect x={area.x} y={area.y} width={area.width} height={area.height} fill="#29d3a7" fillOpacity="0.08" stroke="#29d3a7" strokeDasharray="6 5" vectorEffect="non-scaling-stroke" />;
+            })()}
             {Object.values(remoteCursors).map((cursor) => (
               <g key={cursor.id} transform={`translate(${cursor.x} ${cursor.y})`}>
-                <ArrowRight className="h-5 w-5" color={cursor.color || "#8ab4ff"} />
-                <rect x="14" y="6" width={Math.max(58, String(cursor.username || "").length * 8)} height="24" rx="8" fill={cursor.color || "#8ab4ff"} opacity="0.95" />
-                <text x="22" y="22" fill="#08111f" fontSize="12" fontWeight="800">{cursor.username}</text>
+                <path d="M0 0 L0 20 L5.5 15.5 L9 24 L13 22.2 L9.5 14 L16 14 Z" fill={cursor.color || "#8ab4ff"} stroke="#08111f" strokeWidth="1.5" vectorEffect="non-scaling-stroke" />
+                <rect x="14" y="9" width={Math.max(58, String(cursor.username || "").length * 8)} height="24" rx="8" fill={cursor.color || "#8ab4ff"} opacity="0.95" />
+                <text x="22" y="25" fill="#08111f" fontSize="12" fontWeight="800">{cursor.username}</text>
               </g>
             ))}
           </g>
