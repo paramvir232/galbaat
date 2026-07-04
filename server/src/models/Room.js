@@ -29,6 +29,11 @@ const roomSchema = new mongoose.Schema(
       default: "",
       maxlength: 240
     },
+    originalHostUsername: {
+      type: String,
+      default: "",
+      maxlength: 32
+    },
     lastActivity: {
       type: Date,
       default: Date.now,

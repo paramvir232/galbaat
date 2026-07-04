@@ -80,6 +80,14 @@ function emitBoardUsers(io, roomId) {
   io.to(roomId).emit("whiteboard:users", boardParticipants(roomId));
 }
 
+function ensureRoomHost(roomId) {
+  const users = rooms.get(roomId);
+  if (!users?.size || [...users.values()].some((user) => user.host)) return null;
+  const nextHost = [...users.values()].sort((first, second) => new Date(first.joinedAt).getTime() - new Date(second.joinedAt).getTime())[0];
+  if (nextHost) nextHost.host = true;
+  return nextHost || null;
+}
+
 function roomBoardState(roomId) {
   if (!boardStates.has(roomId)) {
     boardStates.set(roomId, {
@@ -257,8 +265,10 @@ async function leaveCurrentRoom(io, socket) {
   const users = rooms.get(currentRoomId);
   const user = users.get(socket.id);
   users.delete(socket.id);
+  const nextHost = ensureRoomHost(currentRoomId);
   boardUsers.get(currentRoomId)?.delete(socket.id);
   emitBoardUsers(io, currentRoomId);
+  if (nextHost) emitJoinRequests(io, currentRoomId);
   socket.leave(currentRoomId);
 
   socket.to(currentRoomId).emit("participant:left", {
@@ -288,11 +298,12 @@ export function registerSocketHandlers(io) {
           return;
         }
 
+        const usernameClean = cleanUsername(username);
         const users = roomUsers(normalizedRoomId);
+        const isOriginalHostRejoin = Boolean(room.originalHostUsername && room.originalHostUsername === usernameClean);
         if (room.locked && users.size > 0 && !users.has(socket.id)) {
           const approvedSockets = approvedJoinSockets.get(normalizedRoomId);
-          if (!approvedSockets?.has(socket.id)) {
-            const usernameClean = cleanUsername(username);
+          if (!isOriginalHostRejoin && !approvedSockets?.has(socket.id)) {
             const request = {
               id: socket.id,
               socketId: socket.id,
@@ -323,10 +334,22 @@ export function registerSocketHandlers(io) {
           await leaveCurrentRoom(io, socket);
         }
 
+        if (!room.originalHostUsername && users.size === 0) {
+          room.originalHostUsername = usernameClean;
+          await Room.updateOne({ roomId: normalizedRoomId }, { $set: { originalHostUsername: usernameClean } });
+        }
+
+        const isOriginalHost = Boolean(room.originalHostUsername && room.originalHostUsername === usernameClean);
+        if (isOriginalHost) {
+          users.forEach((participant) => {
+            participant.host = false;
+          });
+        }
+
         const user = {
           id: socket.id,
-          username: cleanUsername(username),
-          host: users.size === 0,
+          username: usernameClean,
+          host: users.size === 0 || isOriginalHost,
           cursorColor: ["#29d3a7", "#8ab4ff", "#f59e0b", "#f472b6", "#a78bfa", "#22d3ee"][users.size % 6],
           speaking: false,
           selfMuted: false,
