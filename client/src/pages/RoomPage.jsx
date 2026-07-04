@@ -66,6 +66,7 @@ export default function RoomPage() {
   const [whiteboardOpen, setWhiteboardOpen] = useState(false);
   const speakingRef = useRef(false);
   const micLockedRef = useRef(false);
+  const boardMuteRestoreLockRef = useRef(false);
   const videoEnabledRef = useRef(false);
   const joinedRef = useRef(false);
   const wasScreenSharingRef = useRef(false);
@@ -473,6 +474,33 @@ export default function RoomPage() {
         : current
     );
     socket.emit("participant:mute", { roomId, muted: nextMuted });
+  }
+
+  function selfMuteFromBoard(nextMuted) {
+    if (nextMuted) {
+      boardMuteRestoreLockRef.current = micLockedRef.current;
+      selfMute(true);
+      return;
+    }
+
+    const shouldRestoreLock = boardMuteRestoreLockRef.current;
+    boardMuteRestoreLockRef.current = false;
+    selfMute(false);
+
+    if (!shouldRestoreLock || !connected || self?.hostMuted) return;
+    window.setTimeout(async () => {
+      try {
+        await ensureMedia();
+        speakingRef.current = true;
+        setSpeaking(true);
+        setTrackEnabled(true);
+        socket.emit("ptt:speaking", { roomId, speaking: true });
+        micLockedRef.current = true;
+        setMicLocked(true);
+      } catch {
+        setError("Microphone permission is required before you can talk.");
+      }
+    }, 80);
   }
 
   function saveDisplayName(event) {
@@ -897,7 +925,7 @@ export default function RoomPage() {
         participants={participants}
         peerVolumes={peerVolumes}
         onPeerVolumeChange={changePeerVolume}
-        onSelfMute={selfMute}
+        onSelfMute={selfMuteFromBoard}
         onClose={() => setWhiteboardOpen(false)}
       />
 

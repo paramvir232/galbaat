@@ -1,10 +1,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowRight,
+  ChevronLeft,
+  ChevronRight,
   Circle,
   Copy,
   Diamond,
+  Download,
   Eraser,
+  FileCode,
+  FileImage,
   Hand,
   Highlighter,
   Mic,
@@ -172,6 +177,67 @@ function arrowPoints(element) {
   ];
 }
 
+function escapeHtml(value = "") {
+  return String(value)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+function exportBounds(elements) {
+  if (!elements.length) return { x: -640, y: -360, width: 1280, height: 720 };
+  const bounds = elements.map(elementBounds);
+  const minX = Math.min(...bounds.map((bound) => bound.x));
+  const minY = Math.min(...bounds.map((bound) => bound.y));
+  const maxX = Math.max(...bounds.map((bound) => bound.x + bound.width));
+  const maxY = Math.max(...bounds.map((bound) => bound.y + bound.height));
+  const padding = 80;
+  return {
+    x: minX - padding,
+    y: minY - padding,
+    width: Math.max(640, maxX - minX + padding * 2),
+    height: Math.max(360, maxY - minY + padding * 2)
+  };
+}
+
+function commonSvgAttributes(element) {
+  return `stroke="${escapeHtml(element.stroke)}" stroke-width="${element.strokeWidth}" opacity="${element.opacity}" fill="${escapeHtml(element.fill || "transparent")}" stroke-linecap="round" stroke-linejoin="round"`;
+}
+
+function elementToSvg(element) {
+  const attrs = commonSvgAttributes(element);
+  const bounds = elementBounds(element);
+  const rotate = element.rotation ? ` transform="rotate(${element.rotation} ${bounds.x + bounds.width / 2} ${bounds.y + bounds.height / 2})"` : "";
+
+  if (element.type === "pen" || element.type === "highlighter") {
+    return `<path d="${escapeHtml(pointsPath(element.points))}" ${attrs} fill="none" />`;
+  }
+  if (element.type === "line") {
+    return `<line x1="${element.x}" y1="${element.y}" x2="${element.x + element.width}" y2="${element.y + element.height}" ${attrs} />`;
+  }
+  if (element.type === "arrow") {
+    const points = arrowPoints(element).map((point) => point.join(",")).join(" ");
+    return `<line x1="${element.x}" y1="${element.y}" x2="${element.x + element.width}" y2="${element.y + element.height}" ${attrs} /><polygon points="${points}" fill="${escapeHtml(element.stroke)}" opacity="${element.opacity}" />`;
+  }
+  if (element.type === "rectangle") {
+    return `<rect x="${bounds.x}" y="${bounds.y}" width="${bounds.width}" height="${bounds.height}"${rotate} ${attrs} />`;
+  }
+  if (element.type === "diamond") {
+    const cx = bounds.x + bounds.width / 2;
+    const cy = bounds.y + bounds.height / 2;
+    const points = [[cx, bounds.y], [bounds.x + bounds.width, cy], [cx, bounds.y + bounds.height], [bounds.x, cy]].map((point) => point.join(",")).join(" ");
+    return `<polygon points="${points}"${rotate} ${attrs} />`;
+  }
+  if (element.type === "circle") {
+    return `<ellipse cx="${bounds.x + bounds.width / 2}" cy="${bounds.y + bounds.height / 2}" rx="${bounds.width / 2}" ry="${bounds.height / 2}"${rotate} ${attrs} />`;
+  }
+  if (element.type === "text") {
+    return `<text x="${element.x}" y="${element.y + 24}"${rotate} fill="${escapeHtml(element.stroke)}" opacity="${element.opacity}" font-size="${Math.max(16, element.strokeWidth * 5)}" font-weight="700">${escapeHtml(element.text)}</text>`;
+  }
+  return "";
+}
+
 export default function Whiteboard({ open, roomId, socket, currentUser, participants = [], peerVolumes = {}, onPeerVolumeChange, onSelfMute, onClose }) {
   const stageRef = useRef(null);
   const elementsRef = useRef([]);
@@ -179,6 +245,7 @@ export default function Whiteboard({ open, roomId, socket, currentUser, particip
   const dragRef = useRef(null);
   const clipboardRef = useRef([]);
   const lastCursorRef = useRef(0);
+  const lastElementSyncRef = useRef(0);
   const saveTimerRef = useRef(null);
   const [tool, setTool] = useState("select");
   const [elements, setElements] = useState([]);
@@ -195,6 +262,8 @@ export default function Whiteboard({ open, roomId, socket, currentUser, particip
   const [background, setBackground] = useState("#0f172a");
   const [view, setView] = useState({ x: 0, y: 0, scale: 1 });
   const [error, setError] = useState("");
+  const [panelCollapsed, setPanelCollapsed] = useState(false);
+  const [exportMenuOpen, setExportMenuOpen] = useState(false);
 
   const selectedElement = useMemo(() => elements.find((element) => element.id === selectedIds[0]), [elements, selectedIds]);
 
@@ -225,6 +294,19 @@ export default function Whiteboard({ open, roomId, socket, currentUser, particip
     if (options.broadcast !== false) emitBoard(nextElements);
   }, [emitBoard]);
 
+  function applyElements(nextElements) {
+    setElements(nextElements);
+    elementsRef.current = nextElements;
+  }
+
+  function emitElement(element, action = "upsert", immediate = false) {
+    if (!open || !element) return;
+    const now = Date.now();
+    if (!immediate && now - lastElementSyncRef.current < 28) return;
+    lastElementSyncRef.current = now;
+    socket.emit("whiteboard:element", { roomId, action, element });
+  }
+
   useEffect(() => {
     if (!open) return undefined;
     setError("");
@@ -244,10 +326,33 @@ export default function Whiteboard({ open, roomId, socket, currentUser, particip
     });
 
     function onBoardUpdate(board) {
-      setElements(board.elements || []);
-      elementsRef.current = board.elements || [];
+      const incoming = board.elements || [];
+      if (incoming.length === 0) {
+        applyElements([]);
+        setSelectedIds([]);
+      } else if (dragRef.current) {
+        const merged = new Map(incoming.map((element) => [element.id, element]));
+        elementsRef.current.forEach((element) => merged.set(element.id, element));
+        applyElements([...merged.values()]);
+      } else {
+        applyElements(incoming);
+      }
       setBackground(board.background || "#0f172a");
       backgroundRef.current = board.background || "#0f172a";
+    }
+    function onElementUpdate({ action, element }) {
+      if (!element?.id) return;
+      if (dragRef.current?.id === element.id) return;
+      if (action === "delete") {
+        applyElements(elementsRef.current.filter((item) => item.id !== element.id));
+        setSelectedIds((current) => current.filter((id) => id !== element.id));
+        return;
+      }
+      applyElements(
+        elementsRef.current.some((item) => item.id === element.id)
+          ? elementsRef.current.map((item) => (item.id === element.id ? element : item))
+          : [...elementsRef.current, element]
+      );
     }
     function onCursor(cursor) {
       setRemoteCursors((current) => ({ ...current, [cursor.id]: cursor }));
@@ -272,6 +377,7 @@ export default function Whiteboard({ open, roomId, socket, currentUser, particip
     }
 
     socket.on("whiteboard:update", onBoardUpdate);
+    socket.on("whiteboard:element", onElementUpdate);
     socket.on("whiteboard:cursor", onCursor);
     socket.on("whiteboard:cursor:left", onCursorLeft);
     socket.on("whiteboard:selection", onSelection);
@@ -280,6 +386,7 @@ export default function Whiteboard({ open, roomId, socket, currentUser, particip
       window.clearTimeout(saveTimerRef.current);
       socket.emit("whiteboard:leave", { roomId });
       socket.off("whiteboard:update", onBoardUpdate);
+      socket.off("whiteboard:element", onElementUpdate);
       socket.off("whiteboard:cursor", onCursor);
       socket.off("whiteboard:cursor:left", onCursorLeft);
       socket.off("whiteboard:selection", onSelection);
@@ -317,9 +424,8 @@ export default function Whiteboard({ open, roomId, socket, currentUser, particip
     const hit = hitTest(point);
     if (!hit) return false;
     const next = elementsRef.current.filter((element) => element.id !== hit.id);
-    setElements(next);
-    elementsRef.current = next;
-    emitBoard(next);
+    applyElements(next);
+    emitElement(hit, "delete", true);
     return true;
   }
 
@@ -405,8 +511,8 @@ export default function Whiteboard({ open, roomId, socket, currentUser, particip
       points: tool === "pen" || tool === "highlighter" ? [[point.x, point.y]] : undefined
     };
     const next = [...elementsRef.current, base];
-    setElements(next);
-    elementsRef.current = next;
+    applyElements(next);
+    emitElement(base, "upsert", true);
     dragRef.current = { mode: "draw", id: base.id, start: point, previous: cloneElements(elementsRef.current.slice(0, -1)) };
   }
 
@@ -445,9 +551,9 @@ export default function Whiteboard({ open, roomId, socket, currentUser, particip
     });
 
     if (drag.mode === "move") drag.start = point;
-    setElements(next);
-    elementsRef.current = next;
-    emitBoard(next);
+    applyElements(next);
+    const changed = next.find((element) => element.id === drag.id);
+    emitElement(changed, "upsert", drag.mode !== "draw");
   }
 
   function endPointer() {
@@ -458,7 +564,10 @@ export default function Whiteboard({ open, roomId, socket, currentUser, particip
     }
     setHistory((current) => [...current.slice(-30), drag.previous]);
     setRedoStack([]);
-    emitBoard(elementsRef.current);
+    if (drag.id) {
+      const changed = elementsRef.current.find((element) => element.id === drag.id);
+      if (changed) emitElement(changed, "upsert", true);
+    }
     dragRef.current = null;
   }
 
@@ -490,6 +599,17 @@ export default function Whiteboard({ open, roomId, socket, currentUser, particip
     if (!selectedIds.length) return;
     commitElements(elementsRef.current.filter((element) => !selectedIds.includes(element.id)));
     updateSelection([]);
+  }
+
+  function clearBoard() {
+    if (!elementsRef.current.length) return;
+    if (!window.confirm("Clear the whole whiteboard for everyone? This cannot be undone.")) return;
+    const previous = cloneElements(elementsRef.current);
+    applyElements([]);
+    setSelectedIds([]);
+    setHistory((current) => [...current.slice(-30), previous]);
+    setRedoStack([]);
+    socket.emit("whiteboard:update", { roomId, board: { elements: [], background: backgroundRef.current } });
   }
 
   function copySelected() {
@@ -542,6 +662,80 @@ export default function Whiteboard({ open, roomId, socket, currentUser, particip
     setView((current) => ({ ...current, scale: Math.max(0.25, Math.min(3, nextScale)) }));
   }
 
+  function exportSvgMarkup() {
+    const bounds = exportBounds(elementsRef.current);
+    const markup = elementsRef.current.map(elementToSvg).join("\n      ");
+    return {
+      bounds,
+      svg: `<svg xmlns="http://www.w3.org/2000/svg" width="${Math.round(bounds.width)}" height="${Math.round(bounds.height)}" viewBox="${bounds.x} ${bounds.y} ${bounds.width} ${bounds.height}">
+  <rect x="${bounds.x}" y="${bounds.y}" width="${bounds.width}" height="${bounds.height}" fill="${escapeHtml(backgroundRef.current)}" />
+  <g>
+      ${markup}
+  </g>
+</svg>`
+    };
+  }
+
+  function downloadBlob(blob, filename) {
+    const url = window.URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = filename;
+    link.click();
+    window.setTimeout(() => window.URL.revokeObjectURL(url), 1000);
+  }
+
+  async function downloadAsImage() {
+    setExportMenuOpen(false);
+    const { bounds, svg } = exportSvgMarkup();
+    const svgUrl = window.URL.createObjectURL(new window.Blob([svg], { type: "image/svg+xml;charset=utf-8" }));
+    const image = new window.Image();
+    image.decoding = "async";
+    await new Promise((resolve, reject) => {
+      image.onload = resolve;
+      image.onerror = reject;
+      image.src = svgUrl;
+    });
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.round(bounds.width);
+    canvas.height = Math.round(bounds.height);
+    const context = canvas.getContext("2d");
+    context.drawImage(image, 0, 0);
+    window.URL.revokeObjectURL(svgUrl);
+    canvas.toBlob((blob) => {
+      if (blob) downloadBlob(blob, `galbaat-whiteboard-${roomId}.png`);
+    }, "image/png");
+  }
+
+  function downloadAsHtml() {
+    setExportMenuOpen(false);
+    const { svg } = exportSvgMarkup();
+    const html = `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>GalBaat Whiteboard ${escapeHtml(roomId)}</title>
+  <style>
+    body { margin: 0; min-height: 100vh; background: #0b1220; color: #e5edf8; font-family: Inter, system-ui, sans-serif; }
+    header { padding: 16px 20px; border-bottom: 1px solid rgba(148, 163, 184, 0.2); background: #111827; }
+    h1 { margin: 0; font-size: 18px; }
+    p { margin: 4px 0 0; color: #94a3b8; font-size: 13px; }
+    main { padding: 20px; overflow: auto; }
+    svg { max-width: 100%; height: auto; border-radius: 10px; box-shadow: 0 20px 60px rgba(0,0,0,0.35); }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>GalBaat Whiteboard</h1>
+    <p>Room ${escapeHtml(roomId)} · Exported ${new Date().toLocaleString()}</p>
+  </header>
+  <main>${svg}</main>
+</body>
+</html>`;
+    downloadBlob(new window.Blob([html], { type: "text/html;charset=utf-8" }), `galbaat-whiteboard-${roomId}.html`);
+  }
+
   function renderElement(element) {
     const common = {
       stroke: element.stroke,
@@ -590,20 +784,12 @@ export default function Whiteboard({ open, roomId, socket, currentUser, particip
 
   return (
     <div className="fixed inset-0 z-50 flex flex-col bg-ink text-slate-100">
-      <div className="flex shrink-0 items-center justify-between border-b border-line bg-panel/95 px-3 py-2">
-        <div>
+      <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-line bg-panel/95 px-3 py-2">
+        <div className="min-w-0">
           <h2 className="text-sm font-black">GalBaat Whiteboard</h2>
           <p className="text-xs text-slate-400">Board {roomId} · Autosaves as you draw</p>
         </div>
-        <button type="button" onClick={onClose} className="grid h-10 w-10 place-items-center rounded-md border border-line bg-white/[0.04] hover:bg-white/10" aria-label="Close whiteboard">
-          <X className="h-4 w-4" />
-        </button>
-      </div>
-
-      <div className="relative min-h-0 flex-1 overflow-hidden" style={{ background }}>
-        {error && <div className="absolute left-4 top-4 z-30 rounded-md border border-amberglow/30 bg-amberglow/10 px-3 py-2 text-sm text-amberglow">{error}</div>}
-
-        <div className="absolute left-1/2 top-3 z-30 flex max-w-[calc(100%-24px)] -translate-x-1/2 flex-wrap items-center justify-center gap-1 rounded-lg border border-line bg-panel/95 p-1 shadow-2xl backdrop-blur">
+        <div className="flex max-w-full flex-wrap items-center justify-center gap-1 rounded-lg border border-line bg-ink/60 p-1">
           {TOOLS.map((item) => {
             const Icon = item.icon;
             return (
@@ -618,20 +804,76 @@ export default function Whiteboard({ open, roomId, socket, currentUser, particip
               </button>
             );
           })}
-          <span className="mx-1 h-7 w-px bg-line" />
+          <span className="mx-1 hidden h-7 w-px bg-line sm:block" />
           <button type="button" onClick={undo} title="Undo (Ctrl+Z)" className="grid h-9 w-9 place-items-center rounded-md text-slate-300 hover:bg-white/10"><Undo2 className="h-4 w-4" /></button>
           <button type="button" onClick={redo} title="Redo (Ctrl+Y)" className="grid h-9 w-9 place-items-center rounded-md text-slate-300 hover:bg-white/10"><Redo2 className="h-4 w-4" /></button>
           <button type="button" onClick={copySelected} title="Copy (Ctrl+C)" className="grid h-9 w-9 place-items-center rounded-md text-slate-300 hover:bg-white/10"><Copy className="h-4 w-4" /></button>
           <button type="button" onClick={removeSelected} title="Delete" className="grid h-9 w-9 place-items-center rounded-md text-slate-300 hover:bg-white/10"><Trash2 className="h-4 w-4" /></button>
           <button type="button" onClick={rotateSelected} title="Rotate (R)" className="grid h-9 w-9 place-items-center rounded-md text-slate-300 hover:bg-white/10"><RotateCw className="h-4 w-4" /></button>
+          <button type="button" onClick={clearBoard} title="Clear board" className="inline-flex h-9 items-center gap-2 rounded-md border border-red-400/30 bg-red-500/10 px-3 text-xs font-bold text-red-100 hover:bg-red-500/20">
+            <Trash2 className="h-4 w-4" />
+            Clear
+          </button>
         </div>
+        <div className="flex items-center gap-2">
+          <div className="relative">
+            <button
+              type="button"
+              onClick={() => setExportMenuOpen((openMenu) => !openMenu)}
+              className="grid h-10 w-10 place-items-center rounded-md border border-line bg-white/[0.04] text-slate-200 hover:bg-white/10"
+              aria-label="Download whiteboard"
+              title="Download whiteboard"
+            >
+              <Download className="h-4 w-4" />
+            </button>
+            {exportMenuOpen && (
+              <div className="absolute right-0 top-12 z-50 w-52 overflow-hidden rounded-lg border border-line bg-panel shadow-2xl">
+                <button type="button" onClick={downloadAsImage} className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-sm text-slate-200 hover:bg-white/10">
+                  <FileImage className="h-4 w-4 text-mint" />
+                  Download as image
+                </button>
+                <button type="button" onClick={downloadAsHtml} className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-sm text-slate-200 hover:bg-white/10">
+                  <FileCode className="h-4 w-4 text-skyglass" />
+                  Download as HTML
+                </button>
+              </div>
+            )}
+          </div>
+          <button type="button" onClick={onClose} className="grid h-10 w-10 place-items-center rounded-md border border-line bg-white/[0.04] hover:bg-white/10" aria-label="Close whiteboard">
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+      </div>
 
-        <div className="absolute bottom-3 left-3 right-3 z-30 max-h-[48%] overflow-y-auto rounded-xl border border-line bg-panel/95 p-3 shadow-2xl backdrop-blur lg:bottom-3 lg:right-auto lg:top-16 lg:w-72">
+      <div className="relative min-h-0 flex-1 overflow-hidden" style={{ background }}>
+        {error && <div className="absolute left-4 top-4 z-30 rounded-md border border-amberglow/30 bg-amberglow/10 px-3 py-2 text-sm text-amberglow">{error}</div>}
+
+        {panelCollapsed ? (
+          <button
+            type="button"
+            onClick={() => setPanelCollapsed(false)}
+            title="Show board panel"
+            className="absolute left-3 top-3 z-30 grid h-11 w-11 place-items-center rounded-lg border border-line bg-panel/95 text-slate-200 shadow-2xl backdrop-blur hover:bg-white/10"
+          >
+            <ChevronRight className="h-5 w-5" />
+          </button>
+        ) : (
+        <div className="absolute bottom-3 left-3 top-3 z-30 w-[min(20rem,calc(100%-1.5rem))] overflow-y-auto rounded-xl border border-line bg-panel/95 p-3 shadow-2xl backdrop-blur">
           <div className="space-y-4">
             <section>
-              <div className="mb-2 flex items-center gap-2 text-xs font-bold uppercase tracking-wide text-slate-400">
-                <Palette className="h-4 w-4" />
-                Style
+              <div className="mb-2 flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wide text-slate-400">
+                  <Palette className="h-4 w-4" />
+                  Style
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setPanelCollapsed(true)}
+                  title="Collapse panel"
+                  className="grid h-8 w-8 place-items-center rounded-md border border-line bg-white/[0.04] text-slate-300 hover:bg-white/10"
+                >
+                  <ChevronLeft className="h-4 w-4" />
+                </button>
               </div>
               <div className="grid grid-cols-2 gap-2">
                 <label className="rounded-lg border border-line bg-ink/50 p-2 text-xs text-slate-300">
@@ -749,6 +991,7 @@ export default function Whiteboard({ open, roomId, socket, currentUser, particip
             </section>
           </div>
         </div>
+        )}
 
         <svg
           ref={stageRef}
@@ -758,13 +1001,8 @@ export default function Whiteboard({ open, roomId, socket, currentUser, particip
           onPointerUp={endPointer}
           onPointerCancel={endPointer}
         >
-          <defs>
-            <pattern id="whiteboard-grid" width="40" height="40" patternUnits="userSpaceOnUse">
-              <path d="M 40 0 L 0 0 0 40" fill="none" stroke="rgba(148,163,184,0.12)" strokeWidth="1" />
-            </pattern>
-          </defs>
           <g transform={`translate(${view.x} ${view.y}) scale(${view.scale})`}>
-            <rect x="-100000" y="-100000" width="200000" height="200000" fill="url(#whiteboard-grid)" />
+            <rect x="-100000" y="-100000" width="200000" height="200000" fill="transparent" />
             {elements.map(renderElement)}
             {selectedElement && (
               <g>

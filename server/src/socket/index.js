@@ -518,6 +518,51 @@ export function registerSocketHandlers(io) {
       }
     });
 
+    socket.on("whiteboard:element", async ({ roomId, element, action }, ack) => {
+      try {
+        const normalizedRoomId = String(roomId || socket.data.roomId || "").toUpperCase();
+        const users = rooms.get(normalizedRoomId);
+        const user = users?.get(socket.id);
+        if (!user) {
+          ack?.({ ok: false, error: "Not in room" });
+          return;
+        }
+
+        const cleanElement = cleanBoardElement(element);
+        if (!cleanElement) {
+          ack?.({ ok: false, error: "Invalid element" });
+          return;
+        }
+
+        const board = await Board.findOneAndUpdate(
+          { roomId: normalizedRoomId },
+          { $setOnInsert: { roomId: normalizedRoomId, elements: [], background: "#0f172a", version: 0 } },
+          { new: true, upsert: true }
+        );
+        const current = new Map((board.elements || []).map((item) => [item.id, item.toObject ? item.toObject() : item]));
+
+        if (action === "delete") current.delete(cleanElement.id);
+        else current.set(cleanElement.id, cleanElement);
+
+        board.elements = [...current.values()].slice(-1200);
+        board.version += 1;
+        await board.save();
+
+        const payload = {
+          action: action === "delete" ? "delete" : "upsert",
+          element: cleanElement,
+          version: board.version,
+          updatedBy: socket.id
+        };
+
+        socket.to(normalizedRoomId).emit("whiteboard:element", payload);
+        ack?.({ ok: true, ...payload });
+        touchRoom(normalizedRoomId, users.size).catch(() => {});
+      } catch (error) {
+        ack?.({ ok: false, error: "Whiteboard element sync failed" });
+      }
+    });
+
     socket.on("whiteboard:cursor", ({ roomId, cursor }) => {
       const normalizedRoomId = String(roomId || socket.data.roomId || "").toUpperCase();
       const user = rooms.get(normalizedRoomId)?.get(socket.id);
