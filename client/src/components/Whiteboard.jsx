@@ -60,6 +60,21 @@ function cloneElements(elements) {
   }));
 }
 
+function elementRevision(element) {
+  return Number(element?.revision) || 0;
+}
+
+function withNextRevision(element) {
+  return {
+    ...element,
+    revision: elementRevision(element) + 1
+  };
+}
+
+function isStaleElement(incoming, existing) {
+  return Boolean(existing && elementRevision(incoming) < elementRevision(existing));
+}
+
 function pointsPath(points = []) {
   if (!points.length) return "";
   return points.map((point, index) => `${index === 0 ? "M" : "L"} ${point[0]} ${point[1]}`).join(" ");
@@ -402,21 +417,28 @@ export default function Whiteboard({ open, roomId, socket, currentUser, particip
       if (incoming.length === 0) {
         applyElements([]);
         setSelectedIds([]);
-      } else if (dragRef.current) {
-        const merged = new Map(incoming.map((element) => [element.id, element]));
-        elementsRef.current.forEach((element) => merged.set(element.id, element));
-        applyElements([...merged.values()]);
       } else {
-        applyElements(incoming);
+        const currentById = new Map(elementsRef.current.map((element) => [element.id, element]));
+        const merged = new Map();
+        incoming.forEach((element) => {
+          const existing = currentById.get(element.id);
+          merged.set(element.id, isStaleElement(element, existing) ? existing : element);
+        });
+        if (dragRef.current) {
+          elementsRef.current.forEach((element) => {
+            if (!merged.has(element.id)) merged.set(element.id, element);
+          });
+        }
+        applyElements([...merged.values()]);
       }
       setBackground(board.background || "#0f172a");
       backgroundRef.current = board.background || "#0f172a";
     }
-    function onElementUpdate({ action, element }) {
+  function onElementUpdate({ action, element }) {
       if (!element?.id) return;
       if (dragRef.current?.id === element.id) return;
       const existing = elementsRef.current.find((item) => item.id === element.id);
-      if (existing?.points?.length && element.points?.length && element.points.length < existing.points.length) return;
+      if (isStaleElement(element, existing)) return;
       if (action === "delete") {
         applyElements(elementsRef.current.filter((item) => item.id !== element.id));
         setSelectedIds((current) => current.filter((id) => id !== element.id));
@@ -573,7 +595,8 @@ export default function Whiteboard({ open, roomId, socket, currentUser, particip
           stroke,
           fill: "transparent",
           strokeWidth,
-          opacity
+          opacity,
+          revision: 1
         }
       ];
       commitElements(next);
@@ -591,7 +614,8 @@ export default function Whiteboard({ open, roomId, socket, currentUser, particip
       fill: tool === "highlighter" ? stroke : fill,
       strokeWidth: tool === "highlighter" ? Math.max(10, strokeWidth * 3) : strokeWidth,
       opacity: tool === "highlighter" ? 0.28 : opacity,
-      points: tool === "pen" || tool === "highlighter" ? [[point.x, point.y]] : undefined
+      points: tool === "pen" || tool === "highlighter" ? [[point.x, point.y]] : undefined,
+      revision: 1
     };
     const next = [...elementsRef.current, base];
     applyElements(next);
@@ -627,14 +651,14 @@ export default function Whiteboard({ open, roomId, socket, currentUser, particip
 
     const next = elementsRef.current.map((element) => {
       if (element.id !== drag.id) return element;
-      if (drag.mode === "move") return moveElement(element, point.x - drag.start.x, point.y - drag.start.y);
-      if (drag.mode === "resize") return resizeFromBounds(element, drag.startBounds, nextBoundsForHandle(drag.startBounds, drag.handle, point));
+      if (drag.mode === "move") return withNextRevision(moveElement(element, point.x - drag.start.x, point.y - drag.start.y));
+      if (drag.mode === "resize") return withNextRevision(resizeFromBounds(element, drag.startBounds, nextBoundsForHandle(drag.startBounds, drag.handle, point)));
       if (drag.mode === "rotate") {
         const angle = Math.atan2(point.y - drag.startCenter.y, point.x - drag.startCenter.x);
-        return { ...element, rotation: normalizeAngle(drag.startRotation + ((angle - drag.startAngle) * 180) / Math.PI) };
+        return withNextRevision({ ...element, rotation: normalizeAngle(drag.startRotation + ((angle - drag.startAngle) * 180) / Math.PI) });
       }
-      if (drag.mode === "draw" && element.points?.length) return { ...element, points: [...element.points, [point.x, point.y]] };
-      if (drag.mode === "draw") return { ...element, width: point.x - drag.start.x, height: point.y - drag.start.y };
+      if (drag.mode === "draw" && element.points?.length) return withNextRevision({ ...element, points: [...element.points, [point.x, point.y]] });
+      if (drag.mode === "draw") return withNextRevision({ ...element, width: point.x - drag.start.x, height: point.y - drag.start.y });
       return element;
     });
 
@@ -724,7 +748,7 @@ export default function Whiteboard({ open, roomId, socket, currentUser, particip
 
   function pasteSelected() {
     if (!canEditBoard || !clipboardRef.current.length) return;
-    const pasted = clipboardRef.current.map((element) => ({ ...element, id: makeId(), x: element.x + 24, y: element.y + 24, points: element.points?.map((point) => [point[0] + 24, point[1] + 24]) }));
+    const pasted = clipboardRef.current.map((element) => ({ ...element, id: makeId(), revision: 1, x: element.x + 24, y: element.y + 24, points: element.points?.map((point) => [point[0] + 24, point[1] + 24]) }));
     commitElements([...elementsRef.current, ...pasted]);
     updateSelection(pasted.map((element) => element.id));
   }
@@ -734,6 +758,7 @@ export default function Whiteboard({ open, roomId, socket, currentUser, particip
     const duplicated = cloneElements(elementsRef.current.filter((element) => selectedIds.includes(element.id))).map((element) => ({
       ...element,
       id: makeId(),
+      revision: 1,
       x: element.x + 24,
       y: element.y + 24,
       points: element.points?.map((point) => [point[0] + 24, point[1] + 24])
@@ -745,7 +770,7 @@ export default function Whiteboard({ open, roomId, socket, currentUser, particip
 
   function rotateSelected() {
     if (!canEditBoard || !selectedIds.length) return;
-    commitElements(elementsRef.current.map((element) => (selectedIds.includes(element.id) ? { ...element, rotation: normalizeAngle((element.rotation || 0) - 15) } : element)));
+    commitElements(elementsRef.current.map((element) => (selectedIds.includes(element.id) ? withNextRevision({ ...element, rotation: normalizeAngle((element.rotation || 0) - 15) }) : element)));
   }
 
   async function addImageFromFile(file) {
@@ -777,7 +802,8 @@ export default function Whiteboard({ open, roomId, socket, currentUser, particip
       stroke: "#f8fafc",
       fill: "transparent",
       strokeWidth: 1,
-      opacity: 1
+      opacity: 1,
+      revision: 1
     };
     commitElements([...elementsRef.current, element]);
     updateSelection([element.id]);

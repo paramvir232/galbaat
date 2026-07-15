@@ -9,6 +9,7 @@ const boardElementSchema = new mongoose.Schema(
     width: { type: Number, default: 0 },
     height: { type: Number, default: 0 },
     rotation: { type: Number, default: 0 },
+    revision: { type: Number, default: 0 },
     text: { type: String, default: "" },
     src: { type: String, default: "" },
     points: {

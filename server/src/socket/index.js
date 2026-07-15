@@ -43,6 +43,7 @@ function emitJoinRequests(io, roomId) {
 function publicUser(user) {
   return {
     id: user.id,
+    clientId: user.clientId,
     username: user.username,
     cursorColor: user.cursorColor,
     host: user.host,
@@ -203,6 +204,7 @@ function cleanBoardElement(element) {
     width: Number(element.width) || 0,
     height: Number(element.height) || 0,
     rotation: Number(element.rotation) || 0,
+    revision: Math.max(0, Math.min(1_000_000_000, Number(element.revision) || 0)),
     text: cleanText(element.text, 400),
     src: imageSrc,
     points,
@@ -264,6 +266,11 @@ async function leaveCurrentRoom(io, socket) {
 
   const users = rooms.get(currentRoomId);
   const user = users.get(socket.id);
+  if (!user) {
+    socket.data.roomId = null;
+    socket.leave(currentRoomId);
+    return;
+  }
   users.delete(socket.id);
   const nextHost = ensureRoomHost(currentRoomId);
   boardUsers.get(currentRoomId)?.delete(socket.id);
@@ -287,9 +294,34 @@ async function leaveCurrentRoom(io, socket) {
   await touchRoom(currentRoomId, count);
 }
 
+function removeDuplicateClientFromRoom(io, roomId, clientId, nextSocketId) {
+  if (!clientId) return null;
+  const users = rooms.get(roomId);
+  if (!users) return null;
+  const duplicate = [...users.values()].find((user) => user.id !== nextSocketId && user.clientId === clientId);
+  if (!duplicate) return null;
+
+  users.delete(duplicate.id);
+  boardUsers.get(roomId)?.delete(duplicate.id);
+  const oldSocket = io.sockets.sockets.get(duplicate.id);
+  if (oldSocket) {
+    oldSocket.data.roomId = null;
+    oldSocket.leave(roomId);
+  }
+  io.to(roomId).emit("webrtc:peer-left", { id: duplicate.id });
+  return duplicate;
+}
+
+function canSignalPeer(socket, targetId) {
+  const roomId = socket.data.roomId;
+  if (!roomId) return false;
+  const users = rooms.get(roomId);
+  return Boolean(users?.has(socket.id) && users.has(targetId));
+}
+
 export function registerSocketHandlers(io) {
   io.on("connection", (socket) => {
-    socket.on("room:join", async ({ roomId, username }, ack) => {
+    socket.on("room:join", async ({ roomId, username, clientId }, ack) => {
       try {
         const normalizedRoomId = String(roomId || "").toUpperCase();
         const room = await findRoom(normalizedRoomId);
@@ -299,6 +331,7 @@ export function registerSocketHandlers(io) {
         }
 
         const usernameClean = cleanUsername(username);
+        const clientIdClean = cleanText(clientId, 80);
         const users = roomUsers(normalizedRoomId);
         const isOriginalHostRejoin = Boolean(room.originalHostUsername && room.originalHostUsername === usernameClean);
         if (room.locked && users.size > 0 && !users.has(socket.id)) {
@@ -346,8 +379,12 @@ export function registerSocketHandlers(io) {
           });
         }
 
+        const replacedUser = removeDuplicateClientFromRoom(io, normalizedRoomId, clientIdClean, socket.id);
+        if (replacedUser?.host && !isOriginalHost) ensureRoomHost(normalizedRoomId);
+
         const user = {
           id: socket.id,
+          clientId: clientIdClean,
           username: usernameClean,
           host: users.size === 0 || isOriginalHost,
           cursorColor: ["#29d3a7", "#8ab4ff", "#f59e0b", "#f472b6", "#a78bfa", "#22d3ee"][users.size % 6],
@@ -374,7 +411,7 @@ export function registerSocketHandlers(io) {
           .map(publicUser);
 
         ack?.({ ok: true, user: publicUser(user), room, peers: existingPeers });
-        socket.to(normalizedRoomId).emit("participant:joined", publicUser(user));
+        if (!replacedUser) socket.to(normalizedRoomId).emit("participant:joined", publicUser(user));
         emitParticipants(io, normalizedRoomId);
         await touchRoom(normalizedRoomId, users.size);
       } catch (error) {
@@ -823,6 +860,7 @@ export function registerSocketHandlers(io) {
     });
 
     socket.on("webrtc:offer", ({ to, description }) => {
+      if (!canSignalPeer(socket, to)) return;
       io.to(to).emit("webrtc:offer", {
         from: socket.id,
         description
@@ -830,6 +868,7 @@ export function registerSocketHandlers(io) {
     });
 
     socket.on("webrtc:answer", ({ to, description }) => {
+      if (!canSignalPeer(socket, to)) return;
       io.to(to).emit("webrtc:answer", {
         from: socket.id,
         description
@@ -837,6 +876,7 @@ export function registerSocketHandlers(io) {
     });
 
     socket.on("webrtc:ice-candidate", ({ to, candidate }) => {
+      if (!canSignalPeer(socket, to)) return;
       io.to(to).emit("webrtc:ice-candidate", {
         from: socket.id,
         candidate

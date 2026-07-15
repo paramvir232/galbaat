@@ -240,7 +240,18 @@ export function useWebRtcRoom(socket, roomId) {
   const createPeer = useCallback(
     async (peerId, initiator = false) => {
       const stream = await ensureMedia();
-      if (peersRef.current.has(peerId)) return peersRef.current.get(peerId);
+      const existingPeer = peersRef.current.get(peerId);
+      if (existingPeer) {
+        if (existingPeer.connectionState === "closed" || existingPeer.connectionState === "failed" || existingPeer.iceConnectionState === "failed") {
+          removePeer(peerId);
+        } else {
+          if (initiator && (existingPeer.connectionState === "disconnected" || existingPeer.iceConnectionState === "disconnected")) {
+            existingPeer.restartIce?.();
+            renegotiatePeer(peerId, existingPeer).catch(() => {});
+          }
+          return existingPeer;
+        }
+      }
 
       const pc = new RTCPeerConnection({
         iceServers: [{ urls: STUN_URL }]
@@ -261,6 +272,10 @@ export function useWebRtcRoom(socket, roomId) {
 
       pc.onconnectionstatechange = () => {
         setPeerStates((current) => ({ ...current, [peerId]: pc.connectionState }));
+        if (pc.connectionState === "failed") {
+          pc.restartIce?.();
+          renegotiatePeer(peerId, pc).catch(() => {});
+        }
       };
 
       pc.oniceconnectionstatechange = () => {
@@ -315,7 +330,7 @@ export function useWebRtcRoom(socket, roomId) {
 
       return pc;
     },
-    [ensureMedia, refreshRemoteStreamsState, renegotiatePeer, socket]
+    [ensureMedia, refreshRemoteStreamsState, removePeer, renegotiatePeer, socket]
   );
 
   const connectToPeers = useCallback(

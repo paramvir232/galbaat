@@ -10,7 +10,7 @@ import StatusPill from "../components/StatusPill.jsx";
 import VideoGrid from "../components/VideoGrid.jsx";
 import Whiteboard from "../components/Whiteboard.jsx";
 import { getMessages, getRoom, uploadRoomFile } from "../lib/api.js";
-import { getGuestName, setGuestName } from "../lib/guest.js";
+import { getGuestClientId, getGuestName, setGuestName } from "../lib/guest.js";
 import { useSocket } from "../hooks/useSocket.js";
 import { useWebRtcRoom } from "../hooks/useWebRtcRoom.js";
 
@@ -299,7 +299,7 @@ export default function RoomPage() {
     if (!room || !connected || joinedRef.current) return undefined;
     joinedRef.current = true;
     setStatus("joining");
-    socket.emit("room:join", { roomId, username: getGuestName() }, async (ack) => {
+    socket.emit("room:join", { roomId, username: getGuestName(), clientId: getGuestClientId() }, async (ack) => {
       if (!ack?.ok) {
         joinedRef.current = false;
         if (ack?.pending) {
@@ -343,18 +343,27 @@ export default function RoomPage() {
       setStatus("reconnecting");
     }
     function onParticipantsUpdate(next) {
+      const dedupeMap = new Map();
+      next.forEach((user) => {
+        const key = user.clientId || user.id;
+        dedupeMap.set(key, user);
+      });
+      const deduped = [...dedupeMap.values()];
       const previousHands = participantHandsRef.current;
-      const shouldAlert = next.some((user) => {
+      const shouldAlert = deduped.some((user) => {
         if (user.id === self?.id) return false;
         return previousHands.has(user.id) && !previousHands.get(user.id) && user.handRaised;
       });
-      participantHandsRef.current = new Map(next.map((user) => [user.id, Boolean(user.handRaised)]));
+      participantHandsRef.current = new Map(deduped.map((user) => [user.id, Boolean(user.handRaised)]));
       if (shouldAlert) playHandRaiseAlert();
-      setParticipants(next);
-      const currentSelf = next.find((user) => user.id === self?.id);
+      setParticipants(deduped);
+      const currentSelf = deduped.find((user) => user.id === self?.id || (self?.clientId && user.clientId === self.clientId));
       if (currentSelf) {
         setSelf(currentSelf);
         setMuted(Boolean(currentSelf.muted));
+        const peers = deduped.filter((user) => user.id !== currentSelf.id);
+        syncPeers(peers.map((user) => user.id));
+        connectToPeers(peers).catch(() => setStatus((current) => (current === "connected" ? "voice-limited" : current)));
       }
     }
     function onJoined(user) {
@@ -475,7 +484,7 @@ export default function RoomPage() {
       socket.off("room:join-requests", onJoinRequests);
       socket.off("room:join-approved", onJoinApproved);
     };
-  }, [mobilePanel, navigate, notifyIncomingMessage, playHandRaiseAlert, room, self?.id, socket, stopTalking]);
+  }, [connectToPeers, mobilePanel, navigate, notifyIncomingMessage, playHandRaiseAlert, room, self?.clientId, self?.id, socket, stopTalking, syncPeers]);
 
   useEffect(() => {
     if (mobilePanel === "chat") setUnreadCount(0);
