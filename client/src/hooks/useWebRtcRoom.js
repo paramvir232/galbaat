@@ -148,7 +148,7 @@ export function useWebRtcRoom(socket, roomId) {
           await transceiver.sender.replaceTrack(track || null);
         })
       );
-      if (needsNegotiation || track) await renegotiateAllPeers();
+      if (needsNegotiation) await renegotiateAllPeers();
     },
     [renegotiateAllPeers]
   );
@@ -256,6 +256,7 @@ export function useWebRtcRoom(socket, roomId) {
       const pc = new RTCPeerConnection({
         iceServers: [{ urls: STUN_URL }]
       });
+      pc.__galbaatCanOffer = initiator;
 
       stream.getAudioTracks().forEach((track) => pc.addTrack(track, stream));
       const initialVideoTransceiver = pc.addTransceiver("video", { direction: "sendrecv" });
@@ -287,6 +288,7 @@ export function useWebRtcRoom(socket, roomId) {
       };
 
       pc.onnegotiationneeded = () => {
+        if (!pc.__galbaatCanOffer) return;
         renegotiatePeer(peerId, pc).catch(() => {});
       };
 

@@ -363,7 +363,7 @@ export default function RoomPage() {
         setMuted(Boolean(currentSelf.muted));
         const peers = deduped.filter((user) => user.id !== currentSelf.id);
         syncPeers(peers.map((user) => user.id));
-        connectToPeers(peers).catch(() => setStatus((current) => (current === "connected" ? "voice-limited" : current)));
+        connectToPeers(peers, false).catch(() => setStatus((current) => (current === "connected" ? "voice-limited" : current)));
       }
     }
     function onJoined(user) {
