@@ -316,10 +316,13 @@ export default function RoomPage() {
       setRoom(ack.room);
       setStatus("connected");
       try {
-        const peers = ack.peers || [];
+        const peers = (ack.peers || []).map((peer) => ({
+          ...peer,
+          initiator: ack.user.id < peer.id
+        }));
         syncPeers(peers.map((peer) => peer.id));
         await ensureMedia();
-        await connectToPeers(peers);
+        await connectToPeers(peers, false);
         if (speakingRef.current) {
           socket.emit("ptt:speaking", { roomId, speaking: true });
         }
@@ -361,7 +364,12 @@ export default function RoomPage() {
       if (currentSelf) {
         setSelf(currentSelf);
         setMuted(Boolean(currentSelf.muted));
-        const peers = deduped.filter((user) => user.id !== currentSelf.id);
+        const peers = deduped
+          .filter((user) => user.id !== currentSelf.id)
+          .map((user) => ({
+            ...user,
+            initiator: currentSelf.id < user.id
+          }));
         syncPeers(peers.map((user) => user.id));
         connectToPeers(peers, false).catch(() => setStatus((current) => (current === "connected" ? "voice-limited" : current)));
       }
