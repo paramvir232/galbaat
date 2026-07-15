@@ -245,6 +245,12 @@ export function useWebRtcRoom(socket, roomId) {
         if (existingPeer.connectionState === "closed" || existingPeer.connectionState === "failed" || existingPeer.iceConnectionState === "failed") {
           removePeer(peerId);
         } else {
+          if (initiator && !existingPeer.__galbaatCanOffer) {
+            existingPeer.__galbaatCanOffer = true;
+            if (existingPeer.signalingState === "stable" && !existingPeer.localDescription && !existingPeer.remoteDescription) {
+              await renegotiatePeer(peerId, existingPeer);
+            }
+          }
           if (initiator && (existingPeer.connectionState === "disconnected" || existingPeer.iceConnectionState === "disconnected")) {
             existingPeer.restartIce?.();
             renegotiatePeer(peerId, existingPeer).catch(() => {});
