@@ -316,13 +316,10 @@ export default function RoomPage() {
       setRoom(ack.room);
       setStatus("connected");
       try {
-        const peers = (ack.peers || []).map((peer) => ({
-          ...peer,
-          initiator: true
-        }));
+        const peers = ack.peers || [];
         syncPeers(peers.map((peer) => peer.id));
         await ensureMedia();
-        await connectToPeers(peers, false);
+        await connectToPeers(peers);
         if (speakingRef.current) {
           socket.emit("ptt:speaking", { roomId, speaking: true });
         }
@@ -364,14 +361,6 @@ export default function RoomPage() {
       if (currentSelf) {
         setSelf(currentSelf);
         setMuted(Boolean(currentSelf.muted));
-        const peers = deduped
-          .filter((user) => user.id !== currentSelf.id)
-          .map((user) => ({
-            ...user,
-            initiator: false
-          }));
-        syncPeers(peers.map((user) => user.id));
-        connectToPeers(peers, false).catch(() => setStatus((current) => (current === "connected" ? "voice-limited" : current)));
       }
     }
     function onJoined(user) {
@@ -492,7 +481,7 @@ export default function RoomPage() {
       socket.off("room:join-requests", onJoinRequests);
       socket.off("room:join-approved", onJoinApproved);
     };
-  }, [connectToPeers, mobilePanel, navigate, notifyIncomingMessage, playHandRaiseAlert, room, self?.clientId, self?.id, socket, stopTalking, syncPeers]);
+  }, [mobilePanel, navigate, notifyIncomingMessage, playHandRaiseAlert, room, self?.clientId, self?.id, socket, stopTalking]);
 
   useEffect(() => {
     if (mobilePanel === "chat") setUnreadCount(0);

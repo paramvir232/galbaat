@@ -108,12 +108,6 @@ export function useWebRtcRoom(socket, roomId) {
     [removePeer]
   );
 
-  const playRemoteAudios = useCallback(() => {
-    audioRef.current.forEach((audio) => {
-      audio.play().catch(() => {});
-    });
-  }, []);
-
   const renegotiatePeer = useCallback(
     async (peerId, pc) => {
       if (!pc || pc.connectionState === "closed") return;
@@ -154,7 +148,7 @@ export function useWebRtcRoom(socket, roomId) {
           await transceiver.sender.replaceTrack(track || null);
         })
       );
-      if (needsNegotiation) await renegotiateAllPeers();
+      if (needsNegotiation || track) await renegotiateAllPeers();
     },
     [renegotiateAllPeers]
   );
@@ -246,29 +240,11 @@ export function useWebRtcRoom(socket, roomId) {
   const createPeer = useCallback(
     async (peerId, initiator = false) => {
       const stream = await ensureMedia();
-      const existingPeer = peersRef.current.get(peerId);
-      if (existingPeer) {
-        if (existingPeer.connectionState === "closed" || existingPeer.connectionState === "failed" || existingPeer.iceConnectionState === "failed") {
-          removePeer(peerId);
-        } else {
-          if (initiator && !existingPeer.__galbaatCanOffer) {
-            existingPeer.__galbaatCanOffer = true;
-            if (existingPeer.signalingState === "stable" && !existingPeer.localDescription && !existingPeer.remoteDescription) {
-              await renegotiatePeer(peerId, existingPeer);
-            }
-          }
-          if (initiator && (existingPeer.connectionState === "disconnected" || existingPeer.iceConnectionState === "disconnected")) {
-            existingPeer.restartIce?.();
-            renegotiatePeer(peerId, existingPeer).catch(() => {});
-          }
-          return existingPeer;
-        }
-      }
+      if (peersRef.current.has(peerId)) return peersRef.current.get(peerId);
 
       const pc = new RTCPeerConnection({
         iceServers: [{ urls: STUN_URL }]
       });
-      pc.__galbaatCanOffer = initiator;
 
       stream.getAudioTracks().forEach((track) => pc.addTrack(track, stream));
       const initialVideoTransceiver = pc.addTransceiver("video", { direction: "sendrecv" });
@@ -285,10 +261,6 @@ export function useWebRtcRoom(socket, roomId) {
 
       pc.onconnectionstatechange = () => {
         setPeerStates((current) => ({ ...current, [peerId]: pc.connectionState }));
-        if (pc.connectionState === "failed") {
-          pc.restartIce?.();
-          renegotiatePeer(peerId, pc).catch(() => {});
-        }
       };
 
       pc.oniceconnectionstatechange = () => {
@@ -300,7 +272,6 @@ export function useWebRtcRoom(socket, roomId) {
       };
 
       pc.onnegotiationneeded = () => {
-        if (!pc.__galbaatCanOffer) return;
         renegotiatePeer(peerId, pc).catch(() => {});
       };
 
@@ -318,10 +289,7 @@ export function useWebRtcRoom(socket, roomId) {
         displayStream.onremovetrack = refreshRemoteStreamsState;
         event.track.onended = refreshRemoteStreamsState;
         event.track.onmute = refreshRemoteStreamsState;
-        event.track.onunmute = () => {
-          refreshRemoteStreamsState();
-          if (event.track.kind === "audio") playRemoteAudios();
-        };
+        event.track.onunmute = refreshRemoteStreamsState;
         refreshRemoteStreamsState();
 
         if (event.track.kind === "audio") {
@@ -347,13 +315,13 @@ export function useWebRtcRoom(socket, roomId) {
 
       return pc;
     },
-    [ensureMedia, playRemoteAudios, refreshRemoteStreamsState, removePeer, renegotiatePeer, socket]
+    [ensureMedia, refreshRemoteStreamsState, renegotiatePeer, socket]
   );
 
   const connectToPeers = useCallback(
     async (peers, initiator = true) => {
       await ensureMedia();
-      await Promise.all(peers.map((peer) => createPeer(peer.id, peer.initiator ?? initiator)));
+      await Promise.all(peers.map((peer) => createPeer(peer.id, initiator)));
     },
     [createPeer, ensureMedia]
   );
@@ -419,15 +387,6 @@ export function useWebRtcRoom(socket, roomId) {
     const audio = audioRef.current.get(peerId);
     if (audio) audio.volume = nextVolume;
   }, []);
-
-  useEffect(() => {
-    window.addEventListener("pointerdown", playRemoteAudios);
-    window.addEventListener("keydown", playRemoteAudios);
-    return () => {
-      window.removeEventListener("pointerdown", playRemoteAudios);
-      window.removeEventListener("keydown", playRemoteAudios);
-    };
-  }, [playRemoteAudios]);
 
   useEffect(() => {
     const peers = peersRef.current;
