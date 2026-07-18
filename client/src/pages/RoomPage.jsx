@@ -75,6 +75,7 @@ export default function RoomPage() {
   const joinedRef = useRef(false);
   const wasScreenSharingRef = useRef(false);
   const participantHandsRef = useRef(new Map());
+  const joinRequestsRef = useRef([]);
   const chatResizeRef = useRef(null);
   const optimisticUploadUrlsRef = useRef(new Map());
   const chatAudioContextRef = useRef(null);
@@ -227,6 +228,52 @@ export default function RoomPage() {
     });
   }, []);
 
+  const playJoinAlert = useCallback(() => {
+    const AudioContext = window.AudioContext || window.webkitAudioContext;
+    if (!AudioContext) return;
+    const context = chatAudioContextRef.current || new AudioContext();
+    chatAudioContextRef.current = context;
+    context.resume?.().catch(() => {});
+    const now = context.currentTime;
+
+    [392.00, 523.25].forEach((frequency, index) => {
+      const oscillator = context.createOscillator();
+      const gain = context.createGain();
+      oscillator.type = "sine";
+      oscillator.frequency.setValueAtTime(frequency, now + index * 0.1);
+      gain.gain.setValueAtTime(0.0001, now + index * 0.1);
+      gain.gain.exponentialRampToValueAtTime(0.12, now + index * 0.1 + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.0001, now + index * 0.1 + 0.15);
+      oscillator.connect(gain);
+      gain.connect(context.destination);
+      oscillator.start(now + index * 0.1);
+      oscillator.stop(now + index * 0.1 + 0.2);
+    });
+  }, []);
+
+  const playJoinRequestAlert = useCallback(() => {
+    const AudioContext = window.AudioContext || window.webkitAudioContext;
+    if (!AudioContext) return;
+    const context = chatAudioContextRef.current || new AudioContext();
+    chatAudioContextRef.current = context;
+    context.resume?.().catch(() => {});
+    const now = context.currentTime;
+
+    [587.33, 440.00].forEach((frequency, index) => {
+      const oscillator = context.createOscillator();
+      const gain = context.createGain();
+      oscillator.type = "sine";
+      oscillator.frequency.setValueAtTime(frequency, now + index * 0.15);
+      gain.gain.setValueAtTime(0.0001, now + index * 0.15);
+      gain.gain.exponentialRampToValueAtTime(0.12, now + index * 0.15 + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.0001, now + index * 0.15 + 0.2);
+      oscillator.connect(gain);
+      gain.connect(context.destination);
+      oscillator.start(now + index * 0.15);
+      oscillator.stop(now + index * 0.15 + 0.25);
+    });
+  }, []);
+
   const notifyIncomingMessage = useCallback((message) => {
     if (!message || message.username === "System") return;
     const currentUsername = self?.username || getGuestName();
@@ -289,6 +336,7 @@ export default function RoomPage() {
     setParticipants([]);
     setTyping({});
     setJoinRequests([]);
+    joinRequestsRef.current = [];
     setJoinPanelOpen(false);
     setLockedJoinPending(false);
 
@@ -386,6 +434,7 @@ export default function RoomPage() {
           timestamp: new Date().toISOString()
         }
       ]);
+      playJoinAlert();
     }
     function onLeft(user) {
       setMessages((current) => [
@@ -448,6 +497,13 @@ export default function RoomPage() {
       navigate("/");
     }
     function onJoinRequests(requests = []) {
+      const prevRequests = joinRequestsRef.current;
+      const prevIds = new Set(prevRequests.map((r) => r.id));
+      const hasNewRequest = requests.some((r) => !prevIds.has(r.id));
+      if (hasNewRequest) {
+        playJoinRequestAlert();
+      }
+      joinRequestsRef.current = requests;
       setJoinRequests(requests);
       if (requests.length) setJoinPanelOpen(true);
     }
@@ -494,7 +550,7 @@ export default function RoomPage() {
       socket.off("room:join-requests", onJoinRequests);
       socket.off("room:join-approved", onJoinApproved);
     };
-  }, [mobilePanel, navigate, notifyIncomingMessage, playHandRaiseAlert, room, self?.clientId, self?.id, socket, stopTalking]);
+  }, [mobilePanel, navigate, notifyIncomingMessage, playHandRaiseAlert, playJoinAlert, playJoinRequestAlert, room, self?.clientId, self?.id, socket, stopTalking]);
 
   useEffect(() => {
     if (mobilePanel === "chat") setUnreadCount(0);
