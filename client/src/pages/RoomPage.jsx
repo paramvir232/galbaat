@@ -318,7 +318,7 @@ export default function RoomPage() {
       try {
         const peers = (ack.peers || []).map((peer) => ({
           ...peer,
-          initiator: ack.user.id < peer.id
+          initiator: true
         }));
         syncPeers(peers.map((peer) => peer.id));
         await ensureMedia();
@@ -368,7 +368,7 @@ export default function RoomPage() {
           .filter((user) => user.id !== currentSelf.id)
           .map((user) => ({
             ...user,
-            initiator: currentSelf.id < user.id
+            initiator: false
           }));
         syncPeers(peers.map((user) => user.id));
         connectToPeers(peers, false).catch(() => setStatus((current) => (current === "connected" ? "voice-limited" : current)));

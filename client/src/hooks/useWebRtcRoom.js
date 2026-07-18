@@ -108,6 +108,12 @@ export function useWebRtcRoom(socket, roomId) {
     [removePeer]
   );
 
+  const playRemoteAudios = useCallback(() => {
+    audioRef.current.forEach((audio) => {
+      audio.play().catch(() => {});
+    });
+  }, []);
+
   const renegotiatePeer = useCallback(
     async (peerId, pc) => {
       if (!pc || pc.connectionState === "closed") return;
@@ -312,7 +318,10 @@ export function useWebRtcRoom(socket, roomId) {
         displayStream.onremovetrack = refreshRemoteStreamsState;
         event.track.onended = refreshRemoteStreamsState;
         event.track.onmute = refreshRemoteStreamsState;
-        event.track.onunmute = refreshRemoteStreamsState;
+        event.track.onunmute = () => {
+          refreshRemoteStreamsState();
+          if (event.track.kind === "audio") playRemoteAudios();
+        };
         refreshRemoteStreamsState();
 
         if (event.track.kind === "audio") {
@@ -338,7 +347,7 @@ export function useWebRtcRoom(socket, roomId) {
 
       return pc;
     },
-    [ensureMedia, refreshRemoteStreamsState, removePeer, renegotiatePeer, socket]
+    [ensureMedia, playRemoteAudios, refreshRemoteStreamsState, removePeer, renegotiatePeer, socket]
   );
 
   const connectToPeers = useCallback(
@@ -410,6 +419,15 @@ export function useWebRtcRoom(socket, roomId) {
     const audio = audioRef.current.get(peerId);
     if (audio) audio.volume = nextVolume;
   }, []);
+
+  useEffect(() => {
+    window.addEventListener("pointerdown", playRemoteAudios);
+    window.addEventListener("keydown", playRemoteAudios);
+    return () => {
+      window.removeEventListener("pointerdown", playRemoteAudios);
+      window.removeEventListener("keydown", playRemoteAudios);
+    };
+  }, [playRemoteAudios]);
 
   useEffect(() => {
     const peers = peersRef.current;
