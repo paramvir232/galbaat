@@ -271,6 +271,19 @@ export default function RoomPage() {
   }, [ensureChatAlertReady]);
 
   useEffect(() => {
+    function handleBeforeUnload() {
+      socket.emit("room:leave", { roomId });
+      socket.disconnect();
+    }
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    window.addEventListener("pagehide", handleBeforeUnload);
+    return () => {
+      window.removeEventListener("beforeunload", handleBeforeUnload);
+      window.removeEventListener("pagehide", handleBeforeUnload);
+    };
+  }, [roomId, socket]);
+
+  useEffect(() => {
     joinedRef.current = false;
     setSelf(null);
     setParticipants([]);

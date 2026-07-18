@@ -307,6 +307,7 @@ function removeDuplicateClientFromRoom(io, roomId, clientId, nextSocketId) {
   if (oldSocket) {
     oldSocket.data.roomId = null;
     oldSocket.leave(roomId);
+    oldSocket.disconnect(true);
   }
   io.to(roomId).emit("webrtc:peer-left", { id: duplicate.id });
   return duplicate;
@@ -416,6 +417,15 @@ export function registerSocketHandlers(io) {
         await touchRoom(normalizedRoomId, users.size);
       } catch (error) {
         ack?.({ ok: false, error: "Unable to join room" });
+      }
+    });
+
+    socket.on("room:leave", async ({ roomId } = {}, ack) => {
+      try {
+        await leaveCurrentRoom(io, socket);
+        ack?.({ ok: true });
+      } catch (error) {
+        ack?.({ ok: false, error: "Unable to leave room" });
       }
     });
 
