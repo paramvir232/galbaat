@@ -26,6 +26,8 @@ export function useWebRtcRoom(socket, roomId) {
   const pendingCandidatesRef = useRef(new Map());
   const negotiatingRef = useRef(new Set());
   const negotiationQueueRef = useRef(new Set());
+  const creatingPeersRef = useRef(new Map());
+  const pendingOffersRef = useRef(new Map());
 
   const setTrackEnabled = useCallback((enabled) => {
     setAudioEnabled(enabled);
@@ -237,7 +239,7 @@ export function useWebRtcRoom(socket, roomId) {
     }
   }, [ensureMedia, refreshLocalStreamState, stopVideo, syncVideoTrackToPeers]);
 
-  const createPeer = useCallback(
+  const createPeerInner = useCallback(
     async (peerId, initiator = false) => {
       const stream = await ensureMedia();
       if (peersRef.current.has(peerId)) return peersRef.current.get(peerId);
@@ -299,11 +301,18 @@ export function useWebRtcRoom(socket, roomId) {
             audio.autoplay = true;
             audio.playsInline = true;
             audio.muted = false;
+            audio.style.display = "none";
+            document.body.appendChild(audio);
             audio.volume = volumeRef.current.get(peerId) ?? 1;
             audioRef.current.set(peerId, audio);
           }
-          audio.srcObject = new MediaStream([event.track]);
-          audio.play().catch(() => {});
+          const desiredStream = event.streams[0] || new MediaStream([event.track]);
+          const currentStream = audio.srcObject;
+          const hasTrack = currentStream && currentStream.getAudioTracks().some((t) => t.id === event.track.id);
+          if (!hasTrack) {
+            audio.srcObject = desiredStream;
+            audio.play().catch(() => {});
+          }
         }
       };
 
@@ -318,6 +327,36 @@ export function useWebRtcRoom(socket, roomId) {
     [ensureMedia, refreshRemoteStreamsState, renegotiatePeer, socket]
   );
 
+  const createPeer = useCallback(
+    async (peerId, initiator = false) => {
+      const existing = creatingPeersRef.current.get(peerId);
+      if (existing) {
+        const pc = await existing;
+        if (initiator && !pc.__galbaatCanOffer) {
+          pc.__galbaatCanOffer = true;
+          if (pc.signalingState === "stable" && !pc.localDescription && !pc.remoteDescription) {
+            await renegotiatePeer(peerId, pc);
+          }
+        }
+        if (initiator && pc.connectionState !== "closed" && (pc.connectionState === "disconnected" || pc.iceConnectionState === "disconnected")) {
+          pc.restartIce?.();
+          renegotiatePeer(peerId, pc).catch(() => {});
+        }
+        return pc;
+      }
+
+      const promise = createPeerInner(peerId, initiator);
+      creatingPeersRef.current.set(peerId, promise);
+      try {
+        const pc = await promise;
+        return pc;
+      } finally {
+        creatingPeersRef.current.delete(peerId);
+      }
+    },
+    [createPeerInner, renegotiatePeer]
+  );
+
   const connectToPeers = useCallback(
     async (peers, initiator = true) => {
       await ensureMedia();
@@ -326,10 +365,41 @@ export function useWebRtcRoom(socket, roomId) {
     [createPeer, ensureMedia]
   );
 
+  const processPendingOffer = useCallback(
+    async (from) => {
+      const pending = pendingOffersRef.current.get(from);
+      pendingOffersRef.current.delete(from);
+      if (!pending) return;
+      const pc = peersRef.current.get(from);
+      if (!pc || pc.connectionState === "closed") return;
+      if (pc.signalingState !== "stable") {
+        await pc.setLocalDescription({ type: "rollback" }).catch(() => {});
+      }
+      await pc.setRemoteDescription(pending);
+      const pendingCandidates = pendingCandidatesRef.current.get(from) || [];
+      pendingCandidatesRef.current.delete(from);
+      await Promise.all(pendingCandidates.map((candidate) => pc.addIceCandidate(candidate).catch(() => {})));
+      const answer = await pc.createAnswer();
+      await pc.setLocalDescription(answer);
+      socket.emit("webrtc:answer", { to: from, description: pc.localDescription });
+
+      if (negotiationQueueRef.current.delete(from)) {
+        renegotiatePeer(from, pc).catch(() => {});
+      }
+    },
+    [renegotiatePeer, socket]
+  );
+
   useEffect(() => {
     if (!socket) return undefined;
 
     const handleOffer = async ({ from, description }) => {
+      if (creatingPeersRef.current.has(from)) {
+        pendingOffersRef.current.set(from, description);
+        await creatingPeersRef.current.get(from).catch(() => {});
+        await processPendingOffer(from);
+        return;
+      }
       const pc = await createPeer(from, false);
       if (pc.signalingState !== "stable") {
         await pc.setLocalDescription({ type: "rollback" }).catch(() => {});
@@ -341,20 +411,34 @@ export function useWebRtcRoom(socket, roomId) {
       const answer = await pc.createAnswer();
       await pc.setLocalDescription(answer);
       socket.emit("webrtc:answer", { to: from, description: pc.localDescription });
+
+      if (negotiationQueueRef.current.delete(from)) {
+        renegotiatePeer(from, pc).catch(() => {});
+      }
     };
 
     const handleAnswer = async ({ from, description }) => {
+      if (creatingPeersRef.current.has(from)) {
+        await creatingPeersRef.current.get(from).catch(() => {});
+      }
       const pc = peersRef.current.get(from);
       if (!pc || pc.signalingState !== "have-local-offer") return;
       await pc.setRemoteDescription(description);
       const pendingCandidates = pendingCandidatesRef.current.get(from) || [];
       pendingCandidatesRef.current.delete(from);
       await Promise.all(pendingCandidates.map((candidate) => pc.addIceCandidate(candidate).catch(() => {})));
+
+      if (negotiationQueueRef.current.delete(from)) {
+        renegotiatePeer(from, pc).catch(() => {});
+      }
     };
 
     const handleIce = async ({ from, candidate }) => {
-      const pc = peersRef.current.get(from);
       if (!candidate) return;
+      if (creatingPeersRef.current.has(from)) {
+        await creatingPeersRef.current.get(from).catch(() => {});
+      }
+      const pc = peersRef.current.get(from);
       if (!pc || !pc.remoteDescription) {
         const pending = pendingCandidatesRef.current.get(from) || [];
         pending.push(candidate);
@@ -379,7 +463,7 @@ export function useWebRtcRoom(socket, roomId) {
       socket.off("webrtc:ice-candidate", handleIce);
       socket.off("webrtc:peer-left", handlePeerLeft);
     };
-  }, [createPeer, removePeer, socket]);
+  }, [createPeer, processPendingOffer, removePeer, renegotiatePeer, socket]);
 
   const setPeerVolume = useCallback((peerId, volume) => {
     const nextVolume = Math.max(0, Math.min(1, Number(volume)));

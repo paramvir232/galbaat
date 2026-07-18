@@ -900,106 +900,22 @@ export default function Whiteboard({ open, roomId, socket, currentUser, particip
     downloadBlob(new window.Blob([content], { type: mimeType }), filename);
   }
 
-  function loadCanvasImage(src) {
-    return new Promise((resolve, reject) => {
-      const image = new window.Image();
-      image.onload = () => resolve(image);
-      image.onerror = reject;
-      image.src = src;
-    });
-  }
-
-  async function drawCanvasElement(context, element, offsetX, offsetY) {
-    const bounds = elementBounds(element);
-    const centerX = bounds.x - offsetX + bounds.width / 2;
-    const centerY = bounds.y - offsetY + bounds.height / 2;
-
-    context.save();
-    context.globalAlpha = element.opacity ?? 1;
-    context.strokeStyle = element.stroke || "#f8fafc";
-    context.fillStyle = element.fill && element.fill !== "transparent" ? element.fill : "transparent";
-    context.lineWidth = element.strokeWidth || 4;
-    context.lineCap = "round";
-    context.lineJoin = "round";
-
-    if (element.rotation) {
-      context.translate(centerX, centerY);
-      context.rotate((element.rotation * Math.PI) / 180);
-      context.translate(-centerX, -centerY);
-    }
-
-    if (element.type === "pen" || element.type === "highlighter") {
-      const points = element.points || [];
-      if (points.length) {
-        context.beginPath();
-        context.moveTo(points[0][0] - offsetX, points[0][1] - offsetY);
-        points.slice(1).forEach((point) => context.lineTo(point[0] - offsetX, point[1] - offsetY));
-        context.stroke();
-      }
-    } else if (element.type === "line" || element.type === "arrow") {
-      const x1 = element.x - offsetX;
-      const y1 = element.y - offsetY;
-      const x2 = element.x + element.width - offsetX;
-      const y2 = element.y + element.height - offsetY;
-      context.beginPath();
-      context.moveTo(x1, y1);
-      context.lineTo(x2, y2);
-      context.stroke();
-      if (element.type === "arrow") {
-        const angle = Math.atan2(y2 - y1, x2 - x1);
-        const size = Math.max(10, (element.strokeWidth || 4) * 3);
-        context.fillStyle = element.stroke || "#f8fafc";
-        context.beginPath();
-        context.moveTo(x2, y2);
-        context.lineTo(x2 - size * Math.cos(angle - Math.PI / 6), y2 - size * Math.sin(angle - Math.PI / 6));
-        context.lineTo(x2 - size * Math.cos(angle + Math.PI / 6), y2 - size * Math.sin(angle + Math.PI / 6));
-        context.closePath();
-        context.fill();
-      }
-    } else if (element.type === "rectangle") {
-      if (element.fill && element.fill !== "transparent") context.fillRect(bounds.x - offsetX, bounds.y - offsetY, bounds.width, bounds.height);
-      context.strokeRect(bounds.x - offsetX, bounds.y - offsetY, bounds.width, bounds.height);
-    } else if (element.type === "diamond") {
-      const x = bounds.x - offsetX;
-      const y = bounds.y - offsetY;
-      context.beginPath();
-      context.moveTo(x + bounds.width / 2, y);
-      context.lineTo(x + bounds.width, y + bounds.height / 2);
-      context.lineTo(x + bounds.width / 2, y + bounds.height);
-      context.lineTo(x, y + bounds.height / 2);
-      context.closePath();
-      if (element.fill && element.fill !== "transparent") context.fill();
-      context.stroke();
-    } else if (element.type === "circle") {
-      context.beginPath();
-      context.ellipse(centerX, centerY, bounds.width / 2, bounds.height / 2, 0, 0, Math.PI * 2);
-      if (element.fill && element.fill !== "transparent") context.fill();
-      context.stroke();
-    } else if (element.type === "text") {
-      context.fillStyle = element.stroke || "#f8fafc";
-      context.font = `700 ${Math.max(16, (element.strokeWidth || 4) * 5)}px Inter, system-ui, sans-serif`;
-      context.fillText(element.text || "", element.x - offsetX, element.y + 24 - offsetY);
-    } else if (element.type === "image" && element.src) {
-      const image = await loadCanvasImage(element.src);
-      context.drawImage(image, bounds.x - offsetX, bounds.y - offsetY, bounds.width, bounds.height);
-    }
-
-    context.restore();
-  }
-
   async function downloadAsImage() {
     setExportMenuOpen(false);
     try {
-      const bounds = exportBounds(elementsRef.current);
+      const { bounds, svg } = exportSvgMarkup();
+      const image = new window.Image();
+      image.decoding = "async";
+      await new Promise((resolve, reject) => {
+        image.onload = resolve;
+        image.onerror = reject;
+        image.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
+      });
       const canvas = document.createElement("canvas");
       canvas.width = Math.round(bounds.width);
       canvas.height = Math.round(bounds.height);
       const context = canvas.getContext("2d");
-      context.fillStyle = backgroundRef.current;
-      context.fillRect(0, 0, canvas.width, canvas.height);
-      for (const element of elementsRef.current) {
-        await drawCanvasElement(context, element, bounds.x, bounds.y);
-      }
+      context.drawImage(image, 0, 0);
       canvas.toBlob((blob) => {
         if (blob) downloadBlob(blob, `galbaat-whiteboard-${roomId}.png`);
         else setError("Could not create the whiteboard image.");
