@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { motion } from "framer-motion";
-import { ArrowLeft, FileText, Hand, Hash, Loader2, Lock, Menu, PanelLeftOpen, Pencil, ScreenShare, ScreenShareOff, Settings, Unlock, Video, VideoOff, Wifi, WifiOff, X } from "lucide-react";
+import { ArrowLeft, FileText, Hand, Hash, Loader2, Lock, Menu, Music, PanelLeftOpen, Pencil, ScreenShare, ScreenShareOff, Settings, Unlock, Video, VideoOff, Wifi, WifiOff, X } from "lucide-react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import ChatPanel from "../components/ChatPanel.jsx";
 import ParticipantList from "../components/ParticipantList.jsx";
@@ -32,6 +32,9 @@ export default function RoomPage() {
     startVideo,
     stopVideo,
     startScreenShare,
+    startTabAudioShare,
+    stopTabAudioShare,
+    tabAudioSharing,
     setPeerVolume,
     audioEnabled,
     videoEnabled,
@@ -53,6 +56,7 @@ export default function RoomPage() {
   const [micLocked, setMicLocked] = useState(false);
   const [fileUploading, setFileUploading] = useState(false);
   const [videoBusy, setVideoBusy] = useState(false);
+  const [tabAudioBusy, setTabAudioBusy] = useState(false);
   const [mobilePanel, setMobilePanel] = useState("room");
   const [handRaised, setHandRaised] = useState(false);
   const [unreadCount, setUnreadCount] = useState(0);
@@ -852,6 +856,9 @@ export default function RoomPage() {
         socket.emit("participant:screen", { roomId, sharing: false });
         socket.emit("participant:video", { roomId, video: false });
       } else {
+        if (tabAudioSharing) {
+          await stopTabAudioShare();
+        }
         await startScreenShare();
         socket.emit("participant:screen", { roomId, sharing: true });
       }
@@ -859,6 +866,28 @@ export default function RoomPage() {
       setError(err.message || "Unable to share screen");
     } finally {
       setVideoBusy(false);
+    }
+  }
+
+  async function toggleTabAudioShare() {
+    if (!connected || tabAudioBusy) return;
+    setTabAudioBusy(true);
+    setError("");
+    try {
+      if (tabAudioSharing) {
+        await stopTabAudioShare();
+      } else {
+        if (screenSharing) {
+          await stopVideo();
+          socket.emit("participant:screen", { roomId, sharing: false });
+          socket.emit("participant:video", { roomId, video: false });
+        }
+        await startTabAudioShare();
+      }
+    } catch (err) {
+      setError(err.message || "Unable to toggle music share");
+    } finally {
+      setTabAudioBusy(false);
     }
   }
 
@@ -1052,6 +1081,18 @@ export default function RoomPage() {
               {videoBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : videoEnabled ? <Video className="h-4 w-4" /> : <VideoOff className="h-4 w-4" />}
               <span className="sm:hidden">{videoEnabled ? "Camera" : "Camera"}</span>
               <span className="hidden sm:inline">{videoEnabled ? "Camera on" : "Camera off"}</span>
+            </button>
+            <button
+              type="button"
+              disabled={!connected || tabAudioBusy}
+              onClick={toggleTabAudioShare}
+              className={`inline-flex min-h-11 items-center justify-center gap-2 rounded-full border px-3 py-2 text-xs font-medium transition disabled:cursor-not-allowed disabled:opacity-60 sm:min-h-0 sm:px-4 sm:text-sm ${
+                tabAudioSharing ? "border-mint/40 bg-mint/10 text-mint" : "border-line bg-white/[0.04] text-slate-300 hover:bg-white/10"
+              }`}
+            >
+              {tabAudioBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Music className="h-4 w-4" />}
+              <span className="sm:hidden">{tabAudioSharing ? "Stop" : "Music"}</span>
+              <span className="hidden sm:inline">{tabAudioSharing ? "Stop music" : "Share music"}</span>
             </button>
             <button
               type="button"

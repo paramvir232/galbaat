@@ -29,6 +29,10 @@ export function useWebRtcRoom(socket, roomId) {
   const negotiationQueueRef = useRef(new Set());
   const creatingPeersRef = useRef(new Map());
   const pendingOffersRef = useRef(new Map());
+  const [tabAudioSharing, setTabAudioSharing] = useState(false);
+  const tabAudioTrackRef = useRef(null);
+  const tabAudioSendersRef = useRef(new Map());
+  const displayAudioStreamRef = useRef(null);
 
   const setTrackEnabled = useCallback((enabled) => {
     setAudioEnabled(enabled);
@@ -91,6 +95,7 @@ export function useWebRtcRoom(socket, roomId) {
       }
       audioRef.current.delete(peerId);
       volumeRef.current.delete(peerId);
+      tabAudioSendersRef.current.delete(peerId);
       setPeerStates((current) => {
         const next = { ...current };
         delete next[peerId];
@@ -247,6 +252,72 @@ export function useWebRtcRoom(socket, roomId) {
     }
   }, [ensureMedia, refreshLocalStreamState, stopVideo, syncVideoTrackToPeers]);
 
+  const stopTabAudioShare = useCallback(async () => {
+    if (displayAudioStreamRef.current) {
+      displayAudioStreamRef.current.getTracks().forEach((track) => track.stop());
+      displayAudioStreamRef.current = null;
+    }
+    tabAudioTrackRef.current = null;
+
+    // Remove track from all peers
+    for (const [peerId, pc] of peersRef.current.entries()) {
+      const sender = tabAudioSendersRef.current.get(peerId);
+      if (sender && pc.connectionState !== "closed") {
+        try {
+          pc.removeTrack(sender);
+        } catch (err) {
+          window.console.error(`Failed to remove tab audio track from peer ${peerId}:`, err);
+        }
+      }
+    }
+    tabAudioSendersRef.current.clear();
+    setTabAudioSharing(false);
+    await renegotiateAllPeers();
+  }, [renegotiateAllPeers]);
+
+  const startTabAudioShare = useCallback(async () => {
+    try {
+      const displayStream = await navigator.mediaDevices.getDisplayMedia({
+        video: true,
+        audio: true
+      });
+      const [audioTrack] = displayStream.getAudioTracks();
+      if (!audioTrack) {
+        displayStream.getTracks().forEach((track) => track.stop());
+        throw new Error("You must select a tab and check 'Share tab audio'.");
+      }
+
+      displayAudioStreamRef.current = displayStream;
+      tabAudioTrackRef.current = audioTrack;
+
+      audioTrack.onended = () => {
+        stopTabAudioShare().catch(() => {});
+      };
+
+      // Add track to all active peers
+      for (const [peerId, pc] of peersRef.current.entries()) {
+        if (pc.connectionState !== "closed") {
+          try {
+            const sender = pc.addTrack(audioTrack, localStreamRef.current);
+            tabAudioSendersRef.current.set(peerId, sender);
+          } catch (err) {
+            window.console.error(`Failed to add tab audio track to peer ${peerId}:`, err);
+          }
+        }
+      }
+
+      setTabAudioSharing(true);
+      await renegotiateAllPeers();
+    } catch (error) {
+      if (error.name === "NotAllowedError") {
+        setMediaError("Screen/tab share permission is required.");
+      } else {
+        setMediaError(error.message);
+      }
+      throw error;
+    }
+  }, [renegotiateAllPeers, stopTabAudioShare]);
+
   const createPeerInner = useCallback(
     async (peerId, initiator = false) => {
       const stream = await ensureMedia();
@@ -257,6 +328,14 @@ export function useWebRtcRoom(socket, roomId) {
       });
 
       stream.getAudioTracks().forEach((track) => pc.addTrack(track, stream));
+      if (tabAudioTrackRef.current) {
+        try {
+          const sender = pc.addTrack(tabAudioTrackRef.current, stream);
+          tabAudioSendersRef.current.set(peerId, sender);
+        } catch (err) {
+          window.console.error(`Failed to add tab audio to new peer ${peerId}:`, err);
+        }
+      }
       const initialVideoTransceiver = pc.addTransceiver("video", { direction: "sendrecv" });
       const currentVideoTrack = liveVideoTrack(stream);
       if (currentVideoTrack) {
@@ -522,6 +601,7 @@ export function useWebRtcRoom(socket, roomId) {
         audio.remove();
       });
       audios.clear();
+      displayAudioStreamRef.current?.getTracks().forEach((track) => track.stop());
     };
   }, [roomId]);
 
@@ -533,10 +613,13 @@ export function useWebRtcRoom(socket, roomId) {
     startVideo,
     stopVideo,
     startScreenShare,
+    startTabAudioShare,
+    stopTabAudioShare,
     setPeerVolume,
     audioEnabled,
     videoEnabled,
     screenSharing,
+    tabAudioSharing,
     localStream,
     remoteStreams,
     mediaError,
