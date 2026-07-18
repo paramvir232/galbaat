@@ -204,6 +204,13 @@ export default function ChatPanel({
     };
   }, []);
 
+  useEffect(() => {
+    const textarea = inputRef.current;
+    if (!textarea) return;
+    textarea.style.height = "auto";
+    textarea.style.height = `${Math.max(44, Math.min(120, textarea.scrollHeight))}px`;
+  }, [value]);
+
   function queueAttachment(file) {
     setShowEmojis(false);
     setPendingAttachment((current) => {
@@ -231,6 +238,13 @@ export default function ChatPanel({
     onTypingStart();
     window.clearTimeout(typingTimer.current);
     typingTimer.current = window.setTimeout(onTypingStop, 900);
+  }
+
+  function handleKeyDown(event) {
+    if (event.key === "Enter" && !event.shiftKey) {
+      event.preventDefault();
+      submit(event);
+    }
   }
 
   function refreshMention() {
@@ -276,16 +290,11 @@ export default function ChatPanel({
     if (!file) return;
 
     event.preventDefault();
-    const clean = DOMPurify.sanitize(value.trim(), { ALLOWED_TAGS: [], ALLOWED_ATTR: [] });
     const namedFile = new window.File([file], file.name || pastedImageName(file), {
       type: file.type,
       lastModified: file.lastModified || Date.now()
     });
-    onUploadFile(namedFile, { chatOnly: true, message: clean, optimistic: true });
-    setValue("");
-    setShowEmojis(false);
-    setMention(null);
-    onTypingStop();
+    queueAttachment(namedFile);
   }
 
   function insertMention(username) {
@@ -620,6 +629,12 @@ export default function ChatPanel({
                   <textarea
                     value={editingMessage.value}
                     onChange={(event) => setEditingMessage((current) => ({ ...current, value: event.target.value }))}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter" && !event.shiftKey) {
+                        event.preventDefault();
+                        saveEdit();
+                      }
+                    }}
                     maxLength={1000}
                     rows={3}
                     className="min-h-20 w-full resize-none rounded-md border border-line bg-ink/70 p-2 text-sm text-slate-100 outline-none focus:border-mint/60"
@@ -648,7 +663,7 @@ export default function ChatPanel({
                 <>
                   {message.message && (
                     <>
-                      <p className="break-anywhere text-sm leading-5 text-slate-200 [overflow-wrap:anywhere]">{renderMessageText(message.message)}</p>
+                      <p className="break-anywhere whitespace-pre-wrap text-sm leading-5 text-slate-200 [overflow-wrap:anywhere]">{renderMessageText(message.message)}</p>
                       {previewUrl && renderLinkPreview(previewUrl)}
                     </>
                   )}
@@ -759,17 +774,20 @@ export default function ChatPanel({
           >
             <Smile className="h-5 w-5" />
           </button>
-          <input
+          <textarea
             ref={inputRef}
             value={value}
             onChange={handleChange}
+            onKeyDown={handleKeyDown}
             onClick={refreshMention}
             onKeyUp={refreshMention}
             onFocus={refreshMention}
             onBlur={() => window.setTimeout(() => setMention(null), 120)}
             maxLength={1000}
+            rows={1}
             placeholder="Message, @mention, or paste an image"
-            className="min-h-11 min-w-0 flex-1 basis-0 bg-transparent px-1 text-base text-slate-100 outline-none placeholder:text-slate-500 sm:min-h-10 sm:text-sm"
+            className="scrollbar-none min-w-0 flex-1 basis-0 resize-none bg-transparent px-1 py-2 text-base text-slate-100 outline-none placeholder:text-slate-500 sm:text-sm"
+            style={{ height: "44px", maxHeight: "120px" }}
           />
           <button
             type="button"

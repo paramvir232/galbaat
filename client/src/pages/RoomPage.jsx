@@ -888,6 +888,7 @@ export default function RoomPage() {
         </div>
 
         <div className="flex w-full flex-wrap items-center justify-between gap-1.5 sm:w-auto sm:justify-end sm:gap-2">
+          {room?.createdAt && <RoomTimer createdAt={room.createdAt} />}
           <StatusPill tone={statusTone}>
             {status === "connected" ? "Connected" : status === "voice-limited" ? "Chat connected" : status === "waiting" ? "Waiting" : "Reconnecting"}
           </StatusPill>
@@ -1216,5 +1217,38 @@ export default function RoomPage() {
         </button>
       </nav>
     </main>
+  );
+}
+
+function RoomTimer({ createdAt }) {
+  const [elapsed, setElapsed] = useState("");
+
+  useEffect(() => {
+    const start = new Date(createdAt).getTime();
+    if (Number.isNaN(start)) return;
+
+    function update() {
+      const diff = Math.max(0, Date.now() - start);
+      const secs = Math.floor(diff / 1000);
+      const mins = Math.floor(secs / 60);
+      const hrs = Math.floor(mins / 60);
+
+      const s = String(secs % 60).padStart(2, "0");
+      const m = String(mins % 60).padStart(2, "0");
+      const h = hrs > 0 ? `${String(hrs).padStart(2, "0")}:` : "";
+
+      setElapsed(`${h}${m}:${s}`);
+    }
+
+    update();
+    const interval = window.setInterval(update, 1000);
+    return () => window.clearInterval(interval);
+  }, [createdAt]);
+
+  return (
+    <span className="inline-flex min-h-8 items-center gap-2 rounded-full border border-line bg-white/5 px-3 py-1 text-xs font-medium text-slate-300">
+      <span className="h-1.5 w-1.5 rounded-full bg-slate-400 animate-pulse" />
+      <span>{elapsed}</span>
+    </span>
   );
 }
