@@ -18,6 +18,7 @@ export function useWebRtcRoom(socket, roomId) {
   const [screenSharing, setScreenSharing] = useState(false);
   const [peerStates, setPeerStates] = useState({});
   const [remoteStreams, setRemoteStreams] = useState([]);
+  const [autoplayBlocked, setAutoplayBlocked] = useState(false);
   const peersRef = useRef(new Map());
   const audioRef = useRef(new Map());
   const volumeRef = useRef(new Map());
@@ -109,6 +110,13 @@ export function useWebRtcRoom(socket, roomId) {
     },
     [removePeer]
   );
+
+  const playRemoteAudios = useCallback(() => {
+    audioRef.current.forEach((audio) => {
+      audio.play().catch(() => {});
+    });
+    setAutoplayBlocked(false);
+  }, []);
 
   const renegotiatePeer = useCallback(
     async (peerId, pc) => {
@@ -291,7 +299,10 @@ export function useWebRtcRoom(socket, roomId) {
         displayStream.onremovetrack = refreshRemoteStreamsState;
         event.track.onended = refreshRemoteStreamsState;
         event.track.onmute = refreshRemoteStreamsState;
-        event.track.onunmute = refreshRemoteStreamsState;
+        event.track.onunmute = () => {
+          refreshRemoteStreamsState();
+          if (event.track.kind === "audio") playRemoteAudios();
+        };
         refreshRemoteStreamsState();
 
         if (event.track.kind === "audio") {
@@ -311,7 +322,11 @@ export function useWebRtcRoom(socket, roomId) {
           const hasTrack = currentStream && currentStream.getAudioTracks().some((t) => t.id === event.track.id);
           if (!hasTrack) {
             audio.srcObject = desiredStream;
-            audio.play().catch(() => {});
+            audio.play().catch((err) => {
+              if (err.name === "NotAllowedError") {
+                setAutoplayBlocked(true);
+              }
+            });
           }
         }
       };
@@ -324,7 +339,7 @@ export function useWebRtcRoom(socket, roomId) {
 
       return pc;
     },
-    [ensureMedia, refreshRemoteStreamsState, renegotiatePeer, socket]
+    [ensureMedia, playRemoteAudios, refreshRemoteStreamsState, removePeer, renegotiatePeer, socket]
   );
 
   const createPeer = useCallback(
@@ -473,6 +488,19 @@ export function useWebRtcRoom(socket, roomId) {
   }, []);
 
   useEffect(() => {
+    window.addEventListener("pointerdown", playRemoteAudios);
+    window.addEventListener("keydown", playRemoteAudios);
+    window.addEventListener("click", playRemoteAudios);
+    window.addEventListener("touchstart", playRemoteAudios);
+    return () => {
+      window.removeEventListener("pointerdown", playRemoteAudios);
+      window.removeEventListener("keydown", playRemoteAudios);
+      window.removeEventListener("click", playRemoteAudios);
+      window.removeEventListener("touchstart", playRemoteAudios);
+    };
+  }, [playRemoteAudios]);
+
+  useEffect(() => {
     const peers = peersRef.current;
     const pendingCandidates = pendingCandidatesRef.current;
     const audios = audioRef.current;
@@ -512,6 +540,7 @@ export function useWebRtcRoom(socket, roomId) {
     localStream,
     remoteStreams,
     mediaError,
+    autoplayBlocked,
     peerStates
   };
 }
