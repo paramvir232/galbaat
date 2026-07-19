@@ -350,6 +350,10 @@ export function useWebRtcRoom(socket, roomId) {
 
       pc.onconnectionstatechange = () => {
         setPeerStates((current) => ({ ...current, [peerId]: pc.connectionState }));
+        if (pc.connectionState === "failed") {
+          pc.restartIce?.();
+          renegotiatePeer(peerId, pc).catch(() => {});
+        }
       };
 
       pc.oniceconnectionstatechange = () => {

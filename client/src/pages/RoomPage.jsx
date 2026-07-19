@@ -41,7 +41,8 @@ export default function RoomPage() {
     screenSharing,
     localStream,
     remoteStreams,
-    mediaError
+    mediaError,
+    autoplayBlocked
   } = useWebRtcRoom(socket, roomId);
   const [room, setRoom] = useState(null);
   const [self, setSelf] = useState(null);
@@ -1153,6 +1154,12 @@ export default function RoomPage() {
           {(error || mediaError) && (
             <p className="mt-6 max-w-md rounded-md border border-amberglow/30 bg-amberglow/10 p-3 text-center text-sm text-amberglow">
               {error || mediaError}
+            </p>
+          )}
+
+          {autoplayBlocked && (
+            <p className="mt-6 max-w-md rounded-md border border-mint/30 bg-mint/10 p-3 text-center text-sm text-mint animate-pulse">
+              Audio playback is blocked. Tap anywhere on the page to hear other users.
             </p>
           )}
         </motion.div>
