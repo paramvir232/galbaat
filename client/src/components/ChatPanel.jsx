@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import DOMPurify from "dompurify";
-import { Check, Download, Edit3, File as FileIcon, Loader2, Mic, Plus, Send, Smile, Square, Trash2, UserRound, UsersRound, X } from "lucide-react";
+import { Check, Download, Edit3, File as FileIcon, Loader2, Mic, Minus, Plus, RotateCcw, Send, Smile, Square, Trash2, UserRound, UsersRound, X } from "lucide-react";
 import { apiAssetUrl } from "../lib/api";
 import { formatTime } from "../lib/time";
 
@@ -175,6 +175,8 @@ export default function ChatPanel({
   const [editingMessage, setEditingMessage] = useState(null);
   const [mention, setMention] = useState(null);
   const [imagePreview, setImagePreview] = useState(null);
+  const [imageZoom, setImageZoom] = useState(1);
+  const [imagePan, setImagePan] = useState({ x: 0, y: 0 });
   const endRef = useRef(null);
   const inputRef = useRef(null);
   const fileInputRef = useRef(null);
@@ -186,6 +188,7 @@ export default function ChatPanel({
   const audioSamplesRef = useRef([]);
   const audioSampleRateRef = useRef(44100);
   const chunksRef = useRef([]);
+  const imagePanRef = useRef(null);
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
@@ -203,6 +206,21 @@ export default function ChatPanel({
       stopVoiceStream();
     };
   }, []);
+
+  useEffect(() => {
+    if (!imagePreview) return undefined;
+    setImageZoom(1);
+    setImagePan({ x: 0, y: 0 });
+    const onKeyDown = (event) => {
+      if (event.key === "Escape") setImagePreview(null);
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [imagePreview]);
+
+  useEffect(() => {
+    if (imageZoom === 1) setImagePan({ x: 0, y: 0 });
+  }, [imageZoom]);
 
   useEffect(() => {
     const textarea = inputRef.current;
@@ -538,6 +556,48 @@ export default function ChatPanel({
     onDelete?.(messageId);
   }
 
+  function changeImageZoom(delta) {
+    setImageZoom((current) => {
+      return Math.max(1, Math.min(5, Number((current + delta).toFixed(2))));
+    });
+  }
+
+  function resetImageTransform() {
+    setImageZoom(1);
+    setImagePan({ x: 0, y: 0 });
+  }
+
+  function startImagePan(event) {
+    if (imageZoom <= 1 || event.button !== 0) return;
+    event.currentTarget.setPointerCapture?.(event.pointerId);
+    imagePanRef.current = {
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+      originX: imagePan.x,
+      originY: imagePan.y
+    };
+  }
+
+  function moveImagePan(event) {
+    const drag = imagePanRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    setImagePan({
+      x: drag.originX + event.clientX - drag.startX,
+      y: drag.originY + event.clientY - drag.startY
+    });
+  }
+
+  function stopImagePan(event) {
+    if (imagePanRef.current?.pointerId !== event.pointerId) return;
+    imagePanRef.current = null;
+  }
+
+  function zoomImageWithWheel(event) {
+    event.preventDefault();
+    changeImageZoom(event.deltaY < 0 ? 0.2 : -0.2);
+  }
+
   const mentionOptions = mention
     ? (() => {
         const selfParticipant = participants.find((participant) => participant.username === currentUsername);
@@ -822,9 +882,38 @@ export default function ChatPanel({
       {imagePreview && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-ink/95 p-3 backdrop-blur sm:p-6">
           <div className="relative flex h-full w-full max-w-5xl items-center justify-center overflow-hidden rounded-lg border border-line bg-black/50 p-3">
-            <img src={imagePreview.url} alt={imagePreview.name} className="max-h-full max-w-full object-contain" />
+            <div
+              onPointerDown={startImagePan}
+              onPointerMove={moveImagePan}
+              onPointerUp={stopImagePan}
+              onPointerCancel={stopImagePan}
+              onWheel={zoomImageWithWheel}
+              className={`flex h-full w-full touch-none items-center justify-center overflow-hidden ${imageZoom > 1 ? "cursor-grab active:cursor-grabbing" : "cursor-zoom-in"}`}
+            >
+              <img
+                src={imagePreview.url}
+                alt={imagePreview.name}
+                draggable={false}
+                style={{ transform: `translate(${imagePan.x}px, ${imagePan.y}px) scale(${imageZoom})` }}
+                className="max-h-full max-w-full select-none object-contain transition-transform duration-100"
+              />
+            </div>
             <div className="absolute left-4 top-4 max-w-[calc(100%-5rem)] truncate rounded bg-ink/85 px-3 py-2 text-sm font-medium text-slate-100">
               {imagePreview.name}
+            </div>
+            <div className="absolute bottom-4 left-1/2 flex -translate-x-1/2 items-center gap-1 rounded-md border border-line bg-ink/90 p-1 shadow-lg">
+              <button type="button" onClick={() => changeImageZoom(-0.25)} disabled={imageZoom <= 1} title="Zoom out" className="grid h-9 w-9 place-items-center rounded text-slate-200 hover:bg-white/10 disabled:opacity-40">
+                <Minus className="h-4 w-4" />
+              </button>
+              <button type="button" onClick={resetImageTransform} title="Reset zoom and position" className="min-w-12 rounded px-2 py-2 text-xs font-medium text-slate-200 hover:bg-white/10">
+                {Math.round(imageZoom * 100)}%
+              </button>
+              <button type="button" onClick={() => changeImageZoom(0.25)} disabled={imageZoom >= 5} title="Zoom in" className="grid h-9 w-9 place-items-center rounded text-slate-200 hover:bg-white/10 disabled:opacity-40">
+                <Plus className="h-4 w-4" />
+              </button>
+              <button type="button" onClick={resetImageTransform} title="Reset image" className="grid h-9 w-9 place-items-center rounded text-slate-200 hover:bg-white/10">
+                <RotateCcw className="h-4 w-4" />
+              </button>
             </div>
             <button
               type="button"

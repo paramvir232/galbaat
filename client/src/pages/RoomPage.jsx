@@ -86,6 +86,19 @@ export default function RoomPage() {
   const chatAudioContextRef = useRef(null);
   const notificationPermissionRequestedRef = useRef(false);
   const originalTitleRef = useRef(document.title);
+  const roomRedirectTimerRef = useRef(null);
+
+  const redirectExpiredRoom = useCallback(() => {
+    joinedRef.current = false;
+    setStatus("expired");
+    setError("This room has expired or is no longer available.");
+    window.clearTimeout(roomRedirectTimerRef.current);
+    roomRedirectTimerRef.current = window.setTimeout(() => navigate("/"), 1800);
+  }, [navigate]);
+
+  useEffect(() => {
+    return () => window.clearTimeout(roomRedirectTimerRef.current);
+  }, []);
 
   const getMaxChatWidth = useCallback(() => {
     if (typeof window === "undefined") return MAX_CHAT_WIDTH;
@@ -354,7 +367,8 @@ export default function RoomPage() {
         setRoom(loadedRoom);
         setMessages(history);
       } catch (err) {
-        setError(err.message);
+        const isUnavailable = /room not found/i.test(err.message || "");
+        setError(isUnavailable ? "This room has expired or is no longer available." : err.message);
         window.setTimeout(() => navigate("/"), 1400);
       }
     }
@@ -372,6 +386,10 @@ export default function RoomPage() {
           setLockedJoinPending(true);
           setStatus("waiting");
           setError("");
+          return;
+        }
+        if (/room not found/i.test(ack?.error || "")) {
+          redirectExpiredRoom();
           return;
         }
         setError(ack?.error || "Unable to join room");
@@ -398,7 +416,7 @@ export default function RoomPage() {
         setStatus("voice-limited");
       }
     });
-  }, [connectToPeers, connected, ensureMedia, joinRetryKey, room, roomId, socket, syncPeers]);
+  }, [connectToPeers, connected, ensureMedia, joinRetryKey, redirectExpiredRoom, room, roomId, socket, syncPeers]);
 
   useEffect(() => {
     function onConnect() {
