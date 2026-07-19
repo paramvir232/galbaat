@@ -426,6 +426,14 @@ export default function RoomPage() {
       if (currentSelf) {
         setSelf(currentSelf);
         setMuted(Boolean(currentSelf.muted));
+        const peers = deduped
+          .filter((user) => user.id !== currentSelf.id)
+          .map((user) => ({
+            ...user,
+            initiator: false
+          }));
+        syncPeers(peers.map((user) => user.id));
+        connectToPeers(peers, false).catch(() => setStatus((current) => (current === "connected" ? "voice-limited" : current)));
       }
     }
     function onJoined(user) {
@@ -554,7 +562,7 @@ export default function RoomPage() {
       socket.off("room:join-requests", onJoinRequests);
       socket.off("room:join-approved", onJoinApproved);
     };
-  }, [mobilePanel, navigate, notifyIncomingMessage, playHandRaiseAlert, playJoinAlert, playJoinRequestAlert, room, self?.clientId, self?.id, socket, stopTalking]);
+  }, [connectToPeers, mobilePanel, navigate, notifyIncomingMessage, playHandRaiseAlert, playJoinAlert, playJoinRequestAlert, room, self?.clientId, self?.id, socket, stopTalking, syncPeers]);
 
   useEffect(() => {
     if (mobilePanel === "chat") setUnreadCount(0);
