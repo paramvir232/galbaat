@@ -1272,6 +1272,22 @@ export default function RoomPage() {
         peerVolumes={peerVolumes}
         onPeerVolumeChange={changePeerVolume}
         onSelfMute={selfMuteFromBoard}
+        chatPanel={
+          <ChatPanel
+            messages={messages}
+            participants={participants}
+            typingUsers={typingUsers}
+            fileUploading={fileUploading}
+            currentUsername={self?.username || getGuestName()}
+            onSend={sendMessage}
+            onUploadFile={uploadFile}
+            onReact={reactToMessage}
+            onEdit={editMessage}
+            onDelete={deleteMessage}
+            onTypingStart={() => socket.emit("typing:start", { roomId })}
+            onTypingStop={() => socket.emit("typing:stop", { roomId })}
+          />
+        }
         onClose={() => setWhiteboardOpen(false)}
       />
 

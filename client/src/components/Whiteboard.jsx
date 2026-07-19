@@ -293,7 +293,10 @@ function elementToSvg(element) {
     return `<ellipse cx="${bounds.x + bounds.width / 2}" cy="${bounds.y + bounds.height / 2}" rx="${bounds.width / 2}" ry="${bounds.height / 2}"${rotate} ${attrs} />`;
   }
   if (element.type === "text") {
-    return `<text x="${element.x}" y="${element.y + 24}"${rotate} fill="${escapeHtml(element.stroke)}" opacity="${element.opacity}" font-size="${Math.max(16, element.strokeWidth * 5)}" font-weight="700">${escapeHtml(element.text)}</text>`;
+    const lineHeight = Math.max(16, element.strokeWidth * 5) * 1.3;
+    const lines = String(element.text || "").split(/\r?\n/);
+    const tspans = lines.map((line, index) => `<tspan x="${element.x}" dy="${index ? lineHeight : 0}">${escapeHtml(line)}</tspan>`).join("");
+    return `<text x="${element.x}" y="${element.y + 24}"${rotate} fill="${escapeHtml(element.stroke)}" opacity="${element.opacity}" font-size="${Math.max(16, element.strokeWidth * 5)}" font-weight="700">${tspans}</text>`;
   }
   if (element.type === "image" && element.src) {
     return `<image href="${escapeAttribute(element.src)}" xlink:href="${escapeAttribute(element.src)}" x="${bounds.x}" y="${bounds.y}" width="${bounds.width}" height="${bounds.height}"${rotate} opacity="${element.opacity || 1}" preserveAspectRatio="xMidYMid meet" />`;
@@ -301,7 +304,7 @@ function elementToSvg(element) {
   return "";
 }
 
-export default function Whiteboard({ open, roomId, socket, currentUser, participants = [], peerVolumes = {}, onPeerVolumeChange, onSelfMute, onClose }) {
+export default function Whiteboard({ open, roomId, socket, currentUser, participants = [], peerVolumes = {}, onPeerVolumeChange, onSelfMute, chatPanel, onClose }) {
   const stageRef = useRef(null);
   const elementsRef = useRef([]);
   const backgroundRef = useRef("#0f172a");
@@ -310,6 +313,7 @@ export default function Whiteboard({ open, roomId, socket, currentUser, particip
   const lastCursorRef = useRef(0);
   const lastElementSyncRef = useRef(0);
   const saveTimerRef = useRef(null);
+  const textEditorRef = useRef(null);
   const [tool, setTool] = useState("select");
   const [elements, setElements] = useState([]);
   const [selectedIds, setSelectedIds] = useState([]);
@@ -326,11 +330,13 @@ export default function Whiteboard({ open, roomId, socket, currentUser, particip
   const [view, setView] = useState({ x: 0, y: 0, scale: 1 });
   const [error, setError] = useState("");
   const [panelCollapsed, setPanelCollapsed] = useState(false);
+  const [chatCollapsed, setChatCollapsed] = useState(false);
   const [exportMenuOpen, setExportMenuOpen] = useState(false);
   const [canEditBoard, setCanEditBoard] = useState(Boolean(currentUser?.host));
   const [openVolumeId, setOpenVolumeId] = useState(null);
   const [isDragging, setIsDragging] = useState(false);
   const [marquee, setMarquee] = useState(null);
+  const [textEditor, setTextEditor] = useState(null);
 
   const selectedElement = useMemo(() => elements.find((element) => element.id === selectedIds[0]), [elements, selectedIds]);
   const boardCursor = useMemo(() => cursorForTool(tool, isDragging, canEditBoard), [canEditBoard, isDragging, tool]);
@@ -349,6 +355,11 @@ export default function Whiteboard({ open, roomId, socket, currentUser, particip
   useEffect(() => {
     backgroundRef.current = background;
   }, [background]);
+
+  useEffect(() => {
+    if (!textEditor) return;
+    window.requestAnimationFrame(() => textEditorRef.current?.focus());
+  }, [textEditor]);
 
   const emitBoard = useCallback((nextElements = elementsRef.current, nextBackground = backgroundRef.current) => {
     if (!open || !canEditBoard) return;
@@ -580,26 +591,15 @@ export default function Whiteboard({ open, roomId, socket, currentUser, particip
     }
 
     if (tool === "text") {
-      const text = window.prompt("Text");
-      if (!text?.trim()) return;
-      const next = [
-        ...elementsRef.current,
-        {
-          id: makeId(),
-          type: "text",
-          x: point.x,
-          y: point.y,
-          width: 220,
-          height: 48,
-          text: text.trim().slice(0, 400),
-          stroke,
-          fill: "transparent",
-          strokeWidth,
-          opacity,
-          revision: 1
-        }
-      ];
-      commitElements(next);
+      const rect = stageRef.current.getBoundingClientRect();
+      setIsDragging(false);
+      setTextEditor({
+        x: event.clientX - rect.left,
+        y: event.clientY - rect.top,
+        worldX: point.x,
+        worldY: point.y,
+        value: ""
+      });
       return;
     }
 
@@ -775,8 +775,8 @@ export default function Whiteboard({ open, roomId, socket, currentUser, particip
 
   async function addImageFromFile(file) {
     if (!canEditBoard || !file?.type?.startsWith("image/")) return false;
-    if (file.size > 2_000_000) {
-      setError("Image is too large for the whiteboard. Try an image under 2 MB.");
+    if (file.size > 15 * 1024 * 1024) {
+      setError("Image is too large for the whiteboard. Try an image under 15 MB.");
       return true;
     }
 
@@ -808,6 +808,34 @@ export default function Whiteboard({ open, roomId, socket, currentUser, particip
     commitElements([...elementsRef.current, element]);
     updateSelection([element.id]);
     return true;
+  }
+
+  function submitTextEditor() {
+    const text = textEditor?.value.trim().slice(0, 400);
+    if (!text || !textEditor) {
+      setTextEditor(null);
+      return;
+    }
+    const lines = text.split(/\r?\n/);
+    const next = [
+      ...elementsRef.current,
+      {
+        id: makeId(),
+        type: "text",
+        x: textEditor.worldX,
+        y: textEditor.worldY,
+        width: 220,
+        height: Math.max(48, lines.length * 28),
+        text,
+        stroke,
+        fill: "transparent",
+        strokeWidth,
+        opacity,
+        revision: 1
+      }
+    ];
+    commitElements(next);
+    setTextEditor(null);
   }
 
   function setBoardEditPermission(targetId, nextCanEdit) {
@@ -993,9 +1021,12 @@ export default function Whiteboard({ open, roomId, socket, currentUser, particip
     }
     if (element.type === "circle") return <ellipse key={element.id} cx={bounds.x + bounds.width / 2} cy={bounds.y + bounds.height / 2} rx={bounds.width / 2} ry={bounds.height / 2} transform={rotate} {...common} />;
     if (element.type === "text") {
+      const fontSize = Math.max(16, element.strokeWidth * 5);
       return (
-        <text key={element.id} x={element.x} y={element.y + 24} transform={rotate} fill={element.stroke} opacity={element.opacity} fontSize={Math.max(16, element.strokeWidth * 5)} fontWeight="700">
-          {element.text}
+        <text key={element.id} x={element.x} y={element.y + 24} transform={rotate} fill={element.stroke} opacity={element.opacity} fontSize={fontSize} fontWeight="700">
+          {String(element.text || "").split(/\r?\n/).map((line, index) => (
+            <tspan key={`${element.id}-line-${index}`} x={element.x} dy={index ? fontSize * 1.3 : 0}>{line}</tspan>
+          ))}
         </text>
       );
     }
@@ -1246,6 +1277,29 @@ export default function Whiteboard({ open, roomId, socket, currentUser, particip
         </div>
         )}
 
+        {chatPanel && (chatCollapsed ? (
+          <button
+            type="button"
+            onClick={() => setChatCollapsed(false)}
+            title="Show room chat"
+            className="absolute right-3 top-3 z-30 grid h-11 w-11 place-items-center rounded-lg border border-line bg-panel/95 text-slate-200 shadow-2xl backdrop-blur hover:bg-white/10"
+          >
+            <ChevronLeft className="h-5 w-5" />
+          </button>
+        ) : (
+          <div className="absolute bottom-3 right-3 top-3 z-30 w-[min(24rem,calc(100%-1.5rem))]">
+            <button
+              type="button"
+              onClick={() => setChatCollapsed(true)}
+              title="Collapse room chat"
+              className="absolute right-2 top-2 z-10 grid h-8 w-8 place-items-center rounded-md border border-line bg-panel/95 text-slate-300 shadow-lg backdrop-blur hover:bg-white/10"
+            >
+              <ChevronRight className="h-4 w-4" />
+            </button>
+            {chatPanel}
+          </div>
+        ))}
+
         <svg
           ref={stageRef}
           className="h-full w-full touch-none"
@@ -1300,6 +1354,28 @@ export default function Whiteboard({ open, roomId, socket, currentUser, particip
             ))}
           </g>
         </svg>
+
+        {textEditor && (
+          <textarea
+            ref={textEditorRef}
+            value={textEditor.value}
+            onChange={(event) => setTextEditor((current) => (current ? { ...current, value: event.target.value.slice(0, 400) } : current))}
+            onBlur={submitTextEditor}
+            onPointerDown={(event) => event.stopPropagation()}
+            onKeyDown={(event) => {
+              if (event.key === "Escape") {
+                event.preventDefault();
+                setTextEditor(null);
+              } else if (event.key === "Enter" && !event.shiftKey) {
+                event.preventDefault();
+                submitTextEditor();
+              }
+            }}
+            placeholder="Type text"
+            style={{ left: textEditor.x, top: textEditor.y, color: stroke, fontSize: Math.max(16, strokeWidth * 5) }}
+            className="absolute z-40 min-h-12 w-56 resize rounded-md border border-mint bg-panel/95 px-2 py-1.5 font-bold leading-6 outline-none shadow-2xl placeholder:text-slate-500"
+          />
+        )}
 
         <div className="absolute bottom-4 right-4 z-30 flex items-center gap-2 rounded-xl border border-line bg-panel/95 p-2 shadow-2xl backdrop-blur">
           <button type="button" onClick={() => setZoom(view.scale - 0.1)} title="Zoom out" className="grid h-9 w-9 place-items-center rounded-lg border border-line bg-white/[0.04] text-slate-300 hover:bg-white/10"><Minus className="h-4 w-4" /></button>
