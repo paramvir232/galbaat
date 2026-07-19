@@ -895,6 +895,16 @@ export function registerSocketHandlers(io) {
       });
     });
 
+    socket.on("webrtc:video-sync-request", ({ to }) => {
+      if (!canSignal(socket)) return;
+      io.to(to).emit("webrtc:video-sync-request", { from: socket.id });
+    });
+
+    socket.on("webrtc:video-sync-request", ({ to }) => {
+      if (!canSignal(socket)) return;
+      io.to(to).emit("webrtc:video-sync-request", { from: socket.id });
+    });
+
     socket.on("disconnect", async () => {
       await leaveCurrentRoom(io, socket);
     });

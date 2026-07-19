@@ -80,6 +80,7 @@ export default function RoomPage() {
   const joinedRef = useRef(false);
   const wasScreenSharingRef = useRef(false);
   const participantHandsRef = useRef(new Map());
+  const participantVideoRef = useRef(new Map());
   const joinRequestsRef = useRef([]);
   const chatResizeRef = useRef(null);
   const optimisticUploadUrlsRef = useRef(new Map());
@@ -355,6 +356,7 @@ export default function RoomPage() {
     setTyping({});
     setJoinRequests([]);
     joinRequestsRef.current = [];
+    participantVideoRef.current = new Map();
     setJoinPanelOpen(false);
     setLockedJoinPending(false);
 
@@ -441,6 +443,13 @@ export default function RoomPage() {
         return previousHands.has(user.id) && !previousHands.get(user.id) && user.handRaised;
       });
       participantHandsRef.current = new Map(deduped.map((user) => [user.id, Boolean(user.handRaised)]));
+      const previousVideoStates = participantVideoRef.current;
+      deduped.forEach((user) => {
+        if (user.id !== self?.id && user.video && !previousVideoStates.get(user.id)) {
+          socket.emit("webrtc:video-sync-request", { to: user.id });
+        }
+      });
+      participantVideoRef.current = new Map(deduped.map((user) => [user.id, Boolean(user.video)]));
       if (shouldAlert) playHandRaiseAlert();
       setParticipants(deduped);
       const currentSelf = deduped.find((user) => user.id === self?.id || (self?.clientId && user.clientId === self.clientId));

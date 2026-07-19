@@ -1,14 +1,22 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Maximize2, Video, X } from "lucide-react";
 
-function VideoTile({ stream, label, muted = false, mirrored = false, screen = false, onExpand }) {
+function streamMediaKey(stream) {
+  return stream
+    ?.getTracks()
+    .map((track) => `${track.id}:${track.readyState}:${track.muted}`)
+    .join("|") || "";
+}
+
+function VideoTile({ stream, mediaKey, label, muted = false, mirrored = false, screen = false, onExpand }) {
   const ref = useRef(null);
 
   useEffect(() => {
     if (!ref.current) return;
+    ref.current.srcObject = null;
     ref.current.srcObject = stream || null;
     ref.current.play().catch(() => {});
-  }, [stream]);
+  }, [mediaKey, stream]);
 
   function handleKeyDown(event) {
     if (!onExpand || (event.key !== "Enter" && event.key !== " ")) return;
@@ -30,6 +38,8 @@ function VideoTile({ stream, label, muted = false, mirrored = false, screen = fa
           autoPlay
           playsInline
           muted={muted}
+          onLoadedMetadata={(event) => event.currentTarget.play().catch(() => {})}
+          onCanPlay={(event) => event.currentTarget.play().catch(() => {})}
           className={`h-full w-full ${screen ? "object-contain" : "object-cover"} ${mirrored ? "-scale-x-100" : ""}`}
         />
       ) : (
@@ -90,6 +100,7 @@ export default function VideoGrid({ localStream, remoteStreams, participants, se
           <div key={tile.id} className="min-w-0">
             <VideoTile
               stream={tile.stream}
+              mediaKey={streamMediaKey(tile.stream)}
               label={tile.label}
               muted
               mirrored={tile.local && !tile.screen}
@@ -105,6 +116,7 @@ export default function VideoGrid({ localStream, remoteStreams, participants, se
           <div className="relative flex h-full w-full items-center justify-center overflow-hidden rounded-lg border border-line bg-black/60 p-2 sm:p-4">
             <VideoTile
               stream={expandedTile.stream}
+              mediaKey={streamMediaKey(expandedTile.stream)}
               label={expandedTile.label}
               muted
               screen

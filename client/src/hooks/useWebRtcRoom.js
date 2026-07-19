@@ -180,6 +180,20 @@ export function useWebRtcRoom(socket, roomId) {
     [renegotiateAllPeers]
   );
 
+  const resyncVideoToPeer = useCallback(
+    async (peerId) => {
+      const pc = peersRef.current.get(peerId);
+      const track = liveVideoTrack(localStreamRef.current);
+      if (!pc || pc.connectionState === "closed" || !track) return;
+      const sender = videoTransceiver(pc)?.sender;
+      if (!sender) return;
+
+      await sender.replaceTrack(track);
+      await renegotiatePeer(peerId, pc);
+    },
+    [renegotiatePeer]
+  );
+
   const syncDisplayAudioTrackToPeers = useCallback(
     async (audioTrack) => {
       if (!audioTrack) return;
@@ -624,18 +638,24 @@ export function useWebRtcRoom(socket, roomId) {
       removePeer(id);
     };
 
+    const handleVideoSyncRequest = ({ from }) => {
+      resyncVideoToPeer(from).catch(() => {});
+    };
+
     socket.on("webrtc:offer", handleOffer);
     socket.on("webrtc:answer", handleAnswer);
     socket.on("webrtc:ice-candidate", handleIce);
     socket.on("webrtc:peer-left", handlePeerLeft);
+    socket.on("webrtc:video-sync-request", handleVideoSyncRequest);
 
     return () => {
       socket.off("webrtc:offer", handleOffer);
       socket.off("webrtc:answer", handleAnswer);
       socket.off("webrtc:ice-candidate", handleIce);
       socket.off("webrtc:peer-left", handlePeerLeft);
+      socket.off("webrtc:video-sync-request", handleVideoSyncRequest);
     };
-  }, [createPeer, processPendingOffer, removePeer, renegotiatePeer, socket]);
+  }, [createPeer, processPendingOffer, removePeer, renegotiatePeer, resyncVideoToPeer, socket]);
 
   const setPeerVolume = useCallback((peerId, volume) => {
     const nextVolume = Math.max(0, Math.min(1, Number(volume)));
