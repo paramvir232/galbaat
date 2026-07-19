@@ -10,6 +10,15 @@ function videoTransceiver(pc) {
   return pc.getTransceivers().find((transceiver) => transceiver.receiver?.track?.kind === "video" || transceiver.sender?.track?.kind === "video");
 }
 
+function displayMediaConstraints() {
+  return {
+    video: true,
+    audio: true,
+    systemAudio: "include",
+    surfaceSwitching: "include"
+  };
+}
+
 export function useWebRtcRoom(socket, roomId) {
   const [localStream, setLocalStream] = useState(null);
   const [mediaError, setMediaError] = useState("");
@@ -88,12 +97,12 @@ export function useWebRtcRoom(socket, roomId) {
       peersRef.current.delete(peerId);
       pendingCandidatesRef.current.delete(peerId);
       peerStreamsRef.current.delete(peerId);
-      const audio = audioRef.current.get(peerId);
-      if (audio) {
+      const peerAudios = audioRef.current.get(peerId);
+      peerAudios?.forEach((audio) => {
         audio.pause();
         audio.srcObject = null;
         audio.remove();
-      }
+      });
       audioRef.current.delete(peerId);
       volumeRef.current.delete(peerId);
       tabAudioSendersRef.current.delete(peerId);
@@ -118,8 +127,10 @@ export function useWebRtcRoom(socket, roomId) {
   );
 
   const playRemoteAudios = useCallback(() => {
-    audioRef.current.forEach((audio) => {
-      audio.play().catch(() => {});
+    audioRef.current.forEach((peerAudios) => {
+      peerAudios.forEach((audio) => {
+        audio.play().catch(() => {});
+      });
     });
     setAutoplayBlocked(false);
   }, []);
@@ -284,10 +295,7 @@ export function useWebRtcRoom(socket, roomId) {
   const startScreenShare = useCallback(async () => {
     const stream = await ensureMedia();
     try {
-      const displayStream = await navigator.mediaDevices.getDisplayMedia({
-        video: true,
-        audio: true
-      });
+      const displayStream = await navigator.mediaDevices.getDisplayMedia(displayMediaConstraints());
       const [screenTrack] = displayStream.getVideoTracks();
       if (!screenTrack) return;
       const [audioTrack] = displayStream.getAudioTracks();
@@ -324,10 +332,7 @@ export function useWebRtcRoom(socket, roomId) {
 
   const startTabAudioShare = useCallback(async () => {
     try {
-      const displayStream = await navigator.mediaDevices.getDisplayMedia({
-        video: true,
-        audio: true
-      });
+      const displayStream = await navigator.mediaDevices.getDisplayMedia(displayMediaConstraints());
       const [audioTrack] = displayStream.getAudioTracks();
       if (!audioTrack) {
         displayStream.getTracks().forEach((track) => track.stop());
@@ -424,7 +429,12 @@ export function useWebRtcRoom(socket, roomId) {
         refreshRemoteStreamsState();
 
         if (event.track.kind === "audio") {
-          let audio = audioRef.current.get(peerId);
+          let peerAudios = audioRef.current.get(peerId);
+          if (!peerAudios) {
+            peerAudios = new Map();
+            audioRef.current.set(peerId, peerAudios);
+          }
+          let audio = peerAudios.get(event.track.id);
           if (!audio) {
             audio = new Audio();
             audio.autoplay = true;
@@ -433,20 +443,29 @@ export function useWebRtcRoom(socket, roomId) {
             audio.style.display = "none";
             document.body.appendChild(audio);
             audio.volume = volumeRef.current.get(peerId) ?? 1;
-            audioRef.current.set(peerId, audio);
+            peerAudios.set(event.track.id, audio);
           }
-          // One audio element per person mixes their microphone and display-audio tracks.
-          const desiredStream = displayStream;
-          const currentStream = audio.srcObject;
-          const hasTrack = currentStream && currentStream.getAudioTracks().some((t) => t.id === event.track.id);
-          if (!hasTrack) {
-            audio.srcObject = desiredStream;
-            audio.play().catch((err) => {
-              if (err.name === "NotAllowedError") {
-                setAutoplayBlocked(true);
-              }
-            });
-          }
+          audio.srcObject = new MediaStream([event.track]);
+          audio.play().catch((err) => {
+            if (err.name === "NotAllowedError") {
+              setAutoplayBlocked(true);
+            }
+          });
+
+          event.track.addEventListener(
+            "ended",
+            () => {
+              const currentPeerAudios = audioRef.current.get(peerId);
+              const endedAudio = currentPeerAudios?.get(event.track.id);
+              if (!endedAudio) return;
+              endedAudio.pause();
+              endedAudio.srcObject = null;
+              endedAudio.remove();
+              currentPeerAudios.delete(event.track.id);
+              if (!currentPeerAudios.size) audioRef.current.delete(peerId);
+            },
+            { once: true }
+          );
         }
       };
 
@@ -458,7 +477,7 @@ export function useWebRtcRoom(socket, roomId) {
 
       return pc;
     },
-    [ensureMedia, playRemoteAudios, refreshRemoteStreamsState, removePeer, renegotiatePeer, socket]
+    [ensureMedia, playRemoteAudios, refreshRemoteStreamsState, renegotiatePeer, socket]
   );
 
   const createPeer = useCallback(
@@ -602,8 +621,9 @@ export function useWebRtcRoom(socket, roomId) {
   const setPeerVolume = useCallback((peerId, volume) => {
     const nextVolume = Math.max(0, Math.min(1, Number(volume)));
     volumeRef.current.set(peerId, nextVolume);
-    const audio = audioRef.current.get(peerId);
-    if (audio) audio.volume = nextVolume;
+    audioRef.current.get(peerId)?.forEach((audio) => {
+      audio.volume = nextVolume;
+    });
   }, []);
 
   useEffect(() => {
@@ -635,10 +655,12 @@ export function useWebRtcRoom(socket, roomId) {
       localStreamRef.current?.getTracks().forEach((track) => track.stop());
       localStreamRef.current = null;
       peerStreams.clear();
-      audios.forEach((audio) => {
-        audio.pause();
-        audio.srcObject = null;
-        audio.remove();
+      audios.forEach((peerAudios) => {
+        peerAudios.forEach((audio) => {
+          audio.pause();
+          audio.srcObject = null;
+          audio.remove();
+        });
       });
       audios.clear();
       displayAudioStreamRef.current?.getTracks().forEach((track) => track.stop());
