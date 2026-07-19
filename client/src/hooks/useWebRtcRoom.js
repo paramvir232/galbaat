@@ -556,9 +556,19 @@ export function useWebRtcRoom(socket, roomId) {
       if (!pending) return;
       const pc = peersRef.current.get(from);
       if (!pc || pc.connectionState === "closed") return;
-      if (pc.signalingState !== "stable") {
+
+      const isPolite = socket.id < from;
+      const offerCollision = pending.type === "offer" && (negotiatingRef.current.has(from) || pc.signalingState !== "stable");
+
+      if (offerCollision) {
+        if (!isPolite) {
+          // Impolite peer ignores the incoming offer
+          return;
+        }
+        // Polite peer rolls back its local offer
         await pc.setLocalDescription({ type: "rollback" }).catch(() => {});
       }
+
       await pc.setRemoteDescription(pending);
       const pendingCandidates = pendingCandidatesRef.current.get(from) || [];
       pendingCandidatesRef.current.delete(from);
@@ -586,9 +596,18 @@ export function useWebRtcRoom(socket, roomId) {
         return;
       }
       const pc = await createPeer(from, false);
-      if (pc.signalingState !== "stable") {
+      const isPolite = socket.id < from;
+      const offerCollision = description.type === "offer" && (negotiatingRef.current.has(from) || pc.signalingState !== "stable");
+
+      if (offerCollision) {
+        if (!isPolite) {
+          // Impolite peer ignores the incoming offer
+          return;
+        }
+        // Polite peer rolls back its local offer
         await pc.setLocalDescription({ type: "rollback" }).catch(() => {});
       }
+
       await pc.setRemoteDescription(description);
       const pendingCandidates = pendingCandidatesRef.current.get(from) || [];
       pendingCandidatesRef.current.delete(from);
