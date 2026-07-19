@@ -385,7 +385,9 @@ export default function RoomPage() {
         const peers = ack.peers || [];
         syncPeers(peers.map((peer) => peer.id));
         await ensureMedia();
-        await connectToPeers(peers);
+        // Existing room members make the first offer. The joining member is the
+        // answerer, which prevents both browsers from offering at once.
+        await connectToPeers(peers, false);
         if (speakingRef.current) {
           socket.emit("ptt:speaking", { roomId, speaking: true });
         }
@@ -448,6 +450,10 @@ export default function RoomPage() {
         }
       ]);
       playJoinAlert();
+    }
+    function onPeerReady({ id }) {
+      if (!id || id === self?.id) return;
+      connectToPeers([{ id }], true).catch(() => setStatus((current) => (current === "connected" ? "voice-limited" : current)));
     }
     function onLeft(user) {
       setMessages((current) => [
@@ -531,6 +537,7 @@ export default function RoomPage() {
     socket.on("disconnect", onDisconnect);
     socket.on("participants:update", onParticipantsUpdate);
     socket.on("participant:joined", onJoined);
+    socket.on("webrtc:peer-ready", onPeerReady);
     socket.on("participant:left", onLeft);
     socket.on("chat:message", onChat);
     socket.on("chat:reaction", onReaction);
@@ -550,6 +557,7 @@ export default function RoomPage() {
       socket.off("disconnect", onDisconnect);
       socket.off("participants:update", onParticipantsUpdate);
       socket.off("participant:joined", onJoined);
+      socket.off("webrtc:peer-ready", onPeerReady);
       socket.off("participant:left", onLeft);
       socket.off("chat:message", onChat);
       socket.off("chat:reaction", onReaction);

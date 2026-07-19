@@ -366,6 +366,8 @@ export function useWebRtcRoom(socket, roomId) {
       const pc = new RTCPeerConnection({
         iceServers: [{ urls: STUN_URL }]
       });
+      // Only the peer selected by the room handshake can create the first offer.
+      pc.__galbaatCanOffer = Boolean(initiator);
 
       stream.getAudioTracks().forEach((track) => pc.addTrack(track, stream));
       if (tabAudioTrackRef.current) {
@@ -405,7 +407,9 @@ export function useWebRtcRoom(socket, roomId) {
       };
 
       pc.onnegotiationneeded = () => {
-        renegotiatePeer(peerId, pc).catch(() => {});
+        if (pc.__galbaatCanOffer) {
+          renegotiatePeer(peerId, pc).catch(() => {});
+        }
       };
 
       pc.ontrack = (event) => {
@@ -482,15 +486,28 @@ export function useWebRtcRoom(socket, roomId) {
 
   const createPeer = useCallback(
     async (peerId, initiator = false) => {
+      const enableInitialOffer = async (pc) => {
+        if (!initiator || pc.__galbaatCanOffer) return;
+        pc.__galbaatCanOffer = true;
+        if (pc.signalingState === "stable" && !pc.localDescription && !pc.remoteDescription) {
+          await renegotiatePeer(peerId, pc);
+        }
+      };
+
+      const activePeer = peersRef.current.get(peerId);
+      if (activePeer) {
+        await enableInitialOffer(activePeer);
+        if (initiator && activePeer.connectionState !== "closed" && (activePeer.connectionState === "disconnected" || activePeer.iceConnectionState === "disconnected")) {
+          activePeer.restartIce?.();
+          renegotiatePeer(peerId, activePeer).catch(() => {});
+        }
+        return activePeer;
+      }
+
       const existing = creatingPeersRef.current.get(peerId);
       if (existing) {
         const pc = await existing;
-        if (initiator && !pc.__galbaatCanOffer) {
-          pc.__galbaatCanOffer = true;
-          if (pc.signalingState === "stable" && !pc.localDescription && !pc.remoteDescription) {
-            await renegotiatePeer(peerId, pc);
-          }
-        }
+        await enableInitialOffer(pc);
         if (initiator && pc.connectionState !== "closed" && (pc.connectionState === "disconnected" || pc.iceConnectionState === "disconnected")) {
           pc.restartIce?.();
           renegotiatePeer(peerId, pc).catch(() => {});
@@ -534,6 +551,7 @@ export function useWebRtcRoom(socket, roomId) {
       await Promise.all(pendingCandidates.map((candidate) => pc.addIceCandidate(candidate).catch(() => {})));
       const answer = await pc.createAnswer();
       await pc.setLocalDescription(answer);
+      pc.__galbaatCanOffer = true;
       socket.emit("webrtc:answer", { to: from, description: pc.localDescription });
 
       if (negotiationQueueRef.current.delete(from)) {
@@ -563,6 +581,7 @@ export function useWebRtcRoom(socket, roomId) {
       await Promise.all(pendingCandidates.map((candidate) => pc.addIceCandidate(candidate).catch(() => {})));
       const answer = await pc.createAnswer();
       await pc.setLocalDescription(answer);
+      pc.__galbaatCanOffer = true;
       socket.emit("webrtc:answer", { to: from, description: pc.localDescription });
 
       if (negotiationQueueRef.current.delete(from)) {

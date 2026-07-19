@@ -313,11 +313,11 @@ function removeDuplicateClientFromRoom(io, roomId, clientId, nextSocketId) {
   return duplicate;
 }
 
-function canSignalPeer(socket, targetId) {
+function canSignal(socket) {
   const roomId = socket.data.roomId;
   if (!roomId) return false;
   const users = rooms.get(roomId);
-  return Boolean(users?.has(socket.id) && users.has(targetId));
+  return Boolean(users?.has(socket.id));
 }
 
 export function registerSocketHandlers(io) {
@@ -412,6 +412,8 @@ export function registerSocketHandlers(io) {
           .map(publicUser);
 
         ack?.({ ok: true, user: publicUser(user), room, peers: existingPeers });
+        // Existing members own the first offer, preventing first-join offer collisions.
+        socket.to(normalizedRoomId).emit("webrtc:peer-ready", { id: socket.id });
         if (!replacedUser) socket.to(normalizedRoomId).emit("participant:joined", publicUser(user));
         emitParticipants(io, normalizedRoomId);
         await touchRoom(normalizedRoomId, users.size);
@@ -870,7 +872,7 @@ export function registerSocketHandlers(io) {
     });
 
     socket.on("webrtc:offer", ({ to, description }) => {
-      if (!canSignalPeer(socket, to)) return;
+      if (!canSignal(socket)) return;
       io.to(to).emit("webrtc:offer", {
         from: socket.id,
         description
@@ -878,7 +880,7 @@ export function registerSocketHandlers(io) {
     });
 
     socket.on("webrtc:answer", ({ to, description }) => {
-      if (!canSignalPeer(socket, to)) return;
+      if (!canSignal(socket)) return;
       io.to(to).emit("webrtc:answer", {
         from: socket.id,
         description
@@ -886,7 +888,7 @@ export function registerSocketHandlers(io) {
     });
 
     socket.on("webrtc:ice-candidate", ({ to, candidate }) => {
-      if (!canSignalPeer(socket, to)) return;
+      if (!canSignal(socket)) return;
       io.to(to).emit("webrtc:ice-candidate", {
         from: socket.id,
         candidate
