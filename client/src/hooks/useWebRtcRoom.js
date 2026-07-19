@@ -224,25 +224,80 @@ export function useWebRtcRoom(socket, roomId) {
       audioTrack.onended = null;
       audioTrack.stop();
     }
+    if (displayAudioStreamRef.current) {
+      displayAudioStreamRef.current.getTracks().forEach((track) => track.stop());
+      displayAudioStreamRef.current = null;
+    }
 
-    // This stream is used only by the standalone music-share picker.
-    displayAudioStreamRef.current?.getTracks().forEach((track) => track.stop());
-    displayAudioStreamRef.current = null;
-
+    // Remove track from all peers
     for (const [peerId, pc] of peersRef.current.entries()) {
       const sender = tabAudioSendersRef.current.get(peerId);
       if (sender && pc.connectionState !== "closed") {
         try {
           pc.removeTrack(sender);
         } catch (err) {
-          window.console.error(`Failed to remove shared audio from peer ${peerId}:`, err);
+          window.console.error(`Failed to remove tab audio track from peer ${peerId}:`, err);
         }
       }
     }
     tabAudioSendersRef.current.clear();
     setTabAudioSharing(false);
+    socket?.emit("participant:music", { roomId, sharing: false });
     await renegotiateAllPeers();
-  }, [renegotiateAllPeers]);
+  }, [renegotiateAllPeers, roomId, socket]);
+
+  const startTabAudioShare = useCallback(async () => {
+    try {
+      const displayStream = await navigator.mediaDevices.getDisplayMedia({
+        video: true,
+        audio: true
+      });
+      const [audioTrack] = displayStream.getAudioTracks();
+      if (!audioTrack) {
+        displayStream.getTracks().forEach((track) => track.stop());
+        throw new Error("You must select a tab and check 'Share tab audio'.");
+      }
+
+      // Stop video tracks immediately — we only need audio.
+      // This prevents the browser "Stop sharing" bar from showing up,
+      // which would kill ALL tracks (including audio) if the user clicks it.
+      displayStream.getVideoTracks().forEach((track) => track.stop());
+
+      displayAudioStreamRef.current = displayStream;
+      tabAudioTrackRef.current = audioTrack;
+
+      audioTrack.onended = () => {
+        stopTabAudioShare().catch(() => {});
+      };
+
+      // Create a dedicated stream for the tab audio track so receivers
+      // get it as a separate stream and don't overwrite the mic audio element.
+      const tabAudioStream = new MediaStream([audioTrack]);
+
+      // Add track to all active peers
+      for (const [peerId, pc] of peersRef.current.entries()) {
+        if (pc.connectionState !== "closed") {
+          try {
+            const sender = pc.addTrack(audioTrack, tabAudioStream);
+            tabAudioSendersRef.current.set(peerId, sender);
+          } catch (err) {
+            window.console.error(`Failed to add tab audio track to peer ${peerId}:`, err);
+          }
+        }
+      }
+
+      setTabAudioSharing(true);
+      socket?.emit("participant:music", { roomId, sharing: true });
+      await renegotiateAllPeers();
+    } catch (error) {
+      if (error.name === "NotAllowedError") {
+        setMediaError("Screen/tab share permission is required.");
+      } else {
+        setMediaError(error.message);
+      }
+      throw error;
+    }
+  }, [renegotiateAllPeers, roomId, socket, stopTabAudioShare]);
 
   const startVideo = useCallback(async () => {
     const stream = await ensureMedia();
@@ -322,6 +377,8 @@ export function useWebRtcRoom(socket, roomId) {
       stream.addTrack(screenTrack);
 
       await syncVideoTrackToPeers(screenTrack);
+      // If the user opted in to share audio, forward it to all peers.
+      // If they chose not to (no audio track), screen share still works fine.
       if (audioTrack) {
         tabAudioTrackRef.current = audioTrack;
         audioTrack.onended = () => {
@@ -329,8 +386,7 @@ export function useWebRtcRoom(socket, roomId) {
         };
         await syncDisplayAudioTrackToPeers(audioTrack);
         setTabAudioSharing(true);
-      } else {
-        setMediaError("No audio was shared. Enable the audio option for the selected tab, window, or screen.");
+        socket?.emit("participant:music", { roomId, sharing: true });
       }
       screenTrack.onended = () => {
         stopVideo().catch(() => {});
@@ -342,35 +398,9 @@ export function useWebRtcRoom(socket, roomId) {
       setMediaError("Screen share permission is required.");
       throw error;
     }
-  }, [ensureMedia, refreshLocalStreamState, stopTabAudioShare, stopVideo, syncDisplayAudioTrackToPeers, syncVideoTrackToPeers]);
+  }, [ensureMedia, refreshLocalStreamState, roomId, socket, stopTabAudioShare, stopVideo, syncDisplayAudioTrackToPeers, syncVideoTrackToPeers]);
 
-  const startTabAudioShare = useCallback(async () => {
-    try {
-      const displayStream = await navigator.mediaDevices.getDisplayMedia(displayMediaConstraints());
-      const [audioTrack] = displayStream.getAudioTracks();
-      if (!audioTrack) {
-        displayStream.getTracks().forEach((track) => track.stop());
-        throw new Error("Enable the audio option for the selected tab, window, or screen.");
-      }
 
-      displayAudioStreamRef.current = displayStream;
-      tabAudioTrackRef.current = audioTrack;
-
-      audioTrack.onended = () => {
-        stopTabAudioShare().catch(() => {});
-      };
-
-      await syncDisplayAudioTrackToPeers(audioTrack);
-      setTabAudioSharing(true);
-    } catch (error) {
-      if (error.name === "NotAllowedError") {
-        setMediaError("Screen/tab share permission is required.");
-      } else {
-        setMediaError(error.message);
-      }
-      throw error;
-    }
-  }, [stopTabAudioShare, syncDisplayAudioTrackToPeers]);
 
   const createPeerInner = useCallback(
     async (peerId, initiator = false) => {

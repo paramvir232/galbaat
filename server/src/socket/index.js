@@ -54,6 +54,7 @@ function publicUser(user) {
     video: user.video,
     handRaised: user.handRaised,
     screenSharing: user.screenSharing,
+    musicSharing: Boolean(user.musicSharing),
     joinedAt: user.joinedAt
   };
 }
@@ -395,6 +396,7 @@ export function registerSocketHandlers(io) {
           video: false,
           handRaised: false,
           screenSharing: false,
+          musicSharing: false,
           joinedAt: new Date().toISOString()
         };
 
@@ -638,6 +640,14 @@ export function registerSocketHandlers(io) {
       user.screenSharing = nextSharing;
       if (nextSharing) user.video = true;
       else if (wasSharing) user.video = false;
+      emitParticipants(io, normalizedRoomId);
+    });
+
+    socket.on("participant:music", ({ roomId, sharing }) => {
+      const normalizedRoomId = String(roomId || socket.data.roomId || "").toUpperCase();
+      const user = rooms.get(normalizedRoomId)?.get(socket.id);
+      if (!user) return;
+      user.musicSharing = Boolean(sharing);
       emitParticipants(io, normalizedRoomId);
     });
 

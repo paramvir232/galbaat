@@ -1,4 +1,4 @@
-import { Crown, Hand, Mic, MicOff, PanelLeftClose, Radio, ScreenShare, ShieldX, Signal, UserX, Video, Volume2 } from "lucide-react";
+import { Crown, Hand, Mic, MicOff, Music, PanelLeftClose, Radio, ScreenShare, ShieldX, Signal, UserX, Video, Volume2 } from "lucide-react";
 import { useState } from "react";
 
 export default function ParticipantList({ participants, selfId, isHost = false, peerVolumes = {}, onPeerVolumeChange, onCollapse, onSelfMute, onHostMute, onKick }) {
@@ -46,11 +46,12 @@ export default function ParticipantList({ participants, selfId, isHost = false, 
                 {user.host && <Crown className="h-3.5 w-3.5 text-amberglow" />}
               </div>
               <p className="text-xs text-slate-400">
-                {user.hostMuted ? "Muted by admin" : user.selfMuted ? "Mic muted" : user.handRaised ? "Hand raised" : user.screenSharing ? "Sharing screen" : user.speaking ? "Speaking now" : "Online"}
+                {user.hostMuted ? "Muted by admin" : user.selfMuted ? "Mic muted" : user.handRaised ? "Hand raised" : user.musicSharing ? "Sharing music" : user.screenSharing ? "Sharing screen" : user.speaking ? "Speaking now" : "Online"}
               </p>
             </div>
             <div className="flex min-h-10 shrink-0 items-center justify-end gap-0.5 sm:h-8 sm:min-h-0 sm:gap-2">
               {user.handRaised && <Hand className="h-4 w-4 text-amberglow" />}
+              {user.musicSharing && <Music className="h-4 w-4 text-mint animate-pulse" />}
               {user.screenSharing && <ScreenShare className="h-4 w-4 text-mint" />}
               {user.video && <Video className="h-4 w-4 text-skyglass" />}
               {isSelf ? (
