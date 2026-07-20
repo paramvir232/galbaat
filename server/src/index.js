@@ -7,6 +7,7 @@ import mongoSanitize from "express-mongo-sanitize";
 import rateLimit from "express-rate-limit";
 import helmet from "helmet";
 import http from "node:http";
+import mongoose from "mongoose";
 import { Server } from "socket.io";
 import { env } from "./config/env.js";
 import { connectDb } from "./config/db.js";
@@ -18,9 +19,23 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
 const server = http.createServer(app);
 
+function isAllowedOrigin(origin) {
+  if (!origin) return true;
+  try {
+    return env.allowedOrigins.includes(new URL(origin).origin);
+  } catch {
+    return false;
+  }
+}
+
 const corsOptions = {
-  origin: env.nodeEnv === "production" ? true : env.clientOrigin,
-  credentials: true
+  origin(origin, callback) {
+    callback(null, isAllowedOrigin(origin));
+  },
+  credentials: true,
+  methods: ["GET", "POST", "OPTIONS"],
+  allowedHeaders: ["Content-Type"],
+  maxAge: 86_400
 };
 
 app.set("trust proxy", 1);
@@ -44,7 +59,9 @@ app.use(
 );
 
 app.get("/api/health", (_req, res) => {
-  res.json({ ok: true, name: "GalBaat", time: new Date().toISOString() });
+  const dbReady = mongoose.connection.readyState === 1;
+  res.setHeader("Cache-Control", "no-store");
+  res.status(dbReady ? 200 : 503).json({ ok: dbReady, name: "Talkietiv", time: new Date().toISOString() });
 });
 
 app.use("/api/rooms", roomsRouter);
@@ -84,5 +101,26 @@ setInterval(async () => {
 }, 1000 * 60 * 30);
 
 server.listen(env.port, () => {
-  console.log(`GalBaat server listening on ${env.port}`);
+  console.log(`Talkietiv server listening on ${env.port}`);
 });
+
+let shuttingDown = false;
+
+async function shutdown(signal) {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  console.log(`${signal} received, closing Talkietiv server`);
+
+  const forceExit = setTimeout(() => process.exit(1), 25_000);
+  io.close(async () => {
+    try {
+      await mongoose.disconnect();
+    } finally {
+      clearTimeout(forceExit);
+      process.exit(0);
+    }
+  });
+}
+
+process.once("SIGTERM", () => shutdown("SIGTERM"));
+process.once("SIGINT", () => shutdown("SIGINT"));

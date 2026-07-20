@@ -1,6 +1,6 @@
-# GalBaat
+# Talkietiv
 
-GalBaat is a real-time, no-login walkie-talkie web app with WebRTC voice rooms, push-to-talk, Socket.IO signaling, text chat, anonymous guest names, QR invite sharing, and MongoDB persistence.
+Talkietiv is a real-time, no-login walkie-talkie web app with WebRTC voice rooms, push-to-talk, Socket.IO signaling, text chat, anonymous guest names, QR invite sharing, and MongoDB persistence.
 
 ## Stack
 
@@ -31,12 +31,15 @@ npm start
 
 The server serves the Vite build from `client/dist` when `NODE_ENV=production`.
 
+Before a public launch, follow [the production launch checklist](docs/PRODUCTION_LAUNCH.md). It covers Talkietiv's custom domain, indexing, security headers, monitoring, backups, and operational checks.
+
 ## Environment
 
 Server variables:
 
 - `PORT`: API and Socket.IO port.
 - `CLIENT_ORIGIN`: frontend origin for CORS in development.
+- `ALLOWED_ORIGINS`: comma-separated production browser origins permitted to call the API and Socket.IO server.
 - `MONGODB_URI`: MongoDB connection string.
 - `RATE_LIMIT_WINDOW_MS`: rate-limit window.
 - `RATE_LIMIT_MAX`: max requests per window.
@@ -48,7 +51,7 @@ Client variables:
 
 ## WebRTC Notes
 
-GalBaat uses a peer-to-peer mesh. This keeps latency low for small and medium rooms. For very large rooms, add an SFU such as mediasoup, LiveKit, or Janus.
+Talkietiv uses a peer-to-peer mesh. This keeps latency low for small and medium rooms. For very large rooms, add an SFU such as mediasoup, LiveKit, or Janus.
 
 ## Security
 

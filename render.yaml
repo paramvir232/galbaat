@@ -11,5 +11,7 @@ services:
         value: production
       - key: CLIENT_ORIGIN
         value: https://galbaat-sable.vercel.app
+      - key: ALLOWED_ORIGINS
+        value: https://galbaat-sable.vercel.app,https://talkietiv.com,https://www.talkietiv.com
       - key: MONGODB_URI
         sync: false

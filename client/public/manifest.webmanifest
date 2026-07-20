@@ -1,6 +1,6 @@
 {
-  "name": "GalBaat",
-  "short_name": "GalBaat",
+  "name": "Talkietiv",
+  "short_name": "Talkietiv",
   "description": "Push-to-talk rooms with voice and chat.",
   "start_url": "/",
   "display": "standalone",

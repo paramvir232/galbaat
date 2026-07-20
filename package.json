@@ -1,8 +1,8 @@
 {
-  "name": "galbaat",
+  "name": "talkietiv",
   "version": "1.0.0",
   "private": true,
-  "description": "GalBaat - a real-time walkie-talkie style room app.",
+  "description": "Talkietiv - a real-time walkie-talkie style room app.",
   "scripts": {
     "dev": "concurrently \"npm run dev --workspace server\" \"npm run dev --workspace client\"",
     "build": "npm run build --workspace client",

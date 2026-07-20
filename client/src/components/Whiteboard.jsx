@@ -945,7 +945,7 @@ export default function Whiteboard({ open, roomId, socket, currentUser, particip
       const context = canvas.getContext("2d");
       context.drawImage(image, 0, 0);
       canvas.toBlob((blob) => {
-        if (blob) downloadBlob(blob, `galbaat-whiteboard-${roomId}.png`);
+        if (blob) downloadBlob(blob, `talkietiv-whiteboard-${roomId}.png`);
         else setError("Could not create the whiteboard image.");
       }, "image/png");
     } catch {
@@ -956,7 +956,7 @@ export default function Whiteboard({ open, roomId, socket, currentUser, particip
   function downloadAsSvg() {
     setExportMenuOpen(false);
     const { svg } = exportSvgMarkup();
-    downloadText(svg, `galbaat-whiteboard-${roomId}.svg`, "image/svg+xml;charset=utf-8");
+    downloadText(svg, `talkietiv-whiteboard-${roomId}.svg`, "image/svg+xml;charset=utf-8");
   }
 
   function downloadAsHtml() {
@@ -967,7 +967,7 @@ export default function Whiteboard({ open, roomId, socket, currentUser, particip
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>GalBaat Whiteboard ${escapeHtml(roomId)}</title>
+  <title>Talkietiv Whiteboard ${escapeHtml(roomId)}</title>
   <style>
     body { margin: 0; min-height: 100vh; background: #0b1220; color: #e5edf8; font-family: Inter, system-ui, sans-serif; }
     header { padding: 16px 20px; border-bottom: 1px solid rgba(148, 163, 184, 0.2); background: #111827; }
@@ -979,13 +979,13 @@ export default function Whiteboard({ open, roomId, socket, currentUser, particip
 </head>
 <body>
   <header>
-    <h1>GalBaat Whiteboard</h1>
+    <h1>Talkietiv Whiteboard</h1>
     <p>Room ${escapeHtml(roomId)} - Exported ${new Date().toLocaleString()}</p>
   </header>
   <main>${svg}</main>
 </body>
 </html>`;
-    downloadText(html, `galbaat-whiteboard-${roomId}.html`, "text/html;charset=utf-8");
+    downloadText(html, `talkietiv-whiteboard-${roomId}.html`, "text/html;charset=utf-8");
   }
 
   function renderElement(element) {
@@ -1053,7 +1053,7 @@ export default function Whiteboard({ open, roomId, socket, currentUser, particip
     <div className="fixed inset-0 z-50 flex flex-col bg-ink text-slate-100">
       <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-line bg-panel/95 px-3 py-2">
         <div className="min-w-0">
-          <h2 className="text-sm font-black">GalBaat Whiteboard</h2>
+          <h2 className="text-sm font-black">Talkietiv Whiteboard</h2>
           <p className="text-xs text-slate-400">Board {roomId} - Autosaves as you draw</p>
         </div>
         <div className="flex max-w-full flex-wrap items-center justify-center gap-1 rounded-lg border border-line bg-ink/60 p-1">

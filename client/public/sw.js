@@ -1,4 +1,4 @@
-const CACHE_NAME = "galbaat-v1";
+const CACHE_NAME = "talkietiv-v1";
 const ASSETS = ["/", "/manifest.webmanifest", "/icon.svg"];
 
 self.addEventListener("install", (event) => {

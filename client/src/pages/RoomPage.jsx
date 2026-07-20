@@ -11,6 +11,7 @@ import VideoGrid from "../components/VideoGrid.jsx";
 import Whiteboard from "../components/Whiteboard.jsx";
 import { getMessages, getRoom, uploadRoomFile } from "../lib/api.js";
 import { getGuestClientId, getGuestName, setGuestName } from "../lib/guest.js";
+import { usePageMeta } from "../lib/seo.js";
 import { useSocket } from "../hooks/useSocket.js";
 import { useWebRtcRoom } from "../hooks/useWebRtcRoom.js";
 
@@ -22,6 +23,12 @@ const ROOM_MIN_WIDTH_WITHOUT_PARTICIPANTS = 420;
 export default function RoomPage() {
   const { roomId: routeRoomId } = useParams();
   const roomId = useMemo(() => String(routeRoomId || "").toUpperCase(), [routeRoomId]);
+  usePageMeta({
+    title: "Private room | Talkietiv",
+    description: "A private Talkietiv voice room.",
+    path: `/r/${encodeURIComponent(roomId)}`,
+    index: false
+  });
   const navigate = useNavigate();
   const socket = useSocket();
   const {
@@ -301,10 +308,10 @@ export default function RoomPage() {
     playChatAlert();
 
     if (document.hidden) {
-      document.title = `New message from ${message.username} - GalBaat`;
+      document.title = `New message from ${message.username} - Talkietiv`;
       if ("Notification" in window && window.Notification.permission === "granted") {
         const body = message.message || (message.attachments?.length ? "Sent an attachment" : "New message");
-        const notification = new window.Notification(`GalBaat message from ${message.username}`, {
+        const notification = new window.Notification(`Talkietiv message from ${message.username}`, {
           body,
           tag: `galbaat-${roomId}`,
           icon: "/icon.svg"
@@ -767,7 +774,7 @@ export default function RoomPage() {
 
   function downloadTranscript() {
     const lines = [
-      `${room?.roomName || "GalBaat Room"} transcript`,
+      `${room?.roomName || "Talkietiv Room"} transcript`,
       `Room code: ${roomId}`,
       `Exported: ${new Date().toLocaleString()}`,
       "",
