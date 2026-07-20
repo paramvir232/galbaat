@@ -1,10 +1,10 @@
 import { useState } from "react";
 import { motion } from "framer-motion";
 import { ChevronDown, Headphones, LogIn, Plus, Radio, Sparkles } from "lucide-react";
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { createRoom } from "../lib/api";
 import { getGuestName, setGuestName } from "../lib/guest";
-import { FAQ_ITEMS, HOME_META, usePageMeta } from "../lib/seo.js";
+import { FAQ_ITEMS, HOME_META, SEO_PAGES, usePageMeta } from "../lib/seo.js";
 
 export default function LandingPage() {
   const [roomName, setRoomName] = useState("");
@@ -181,6 +181,31 @@ export default function LandingPage() {
             })}
           </div>
         </section>
+
+        <footer className="border-t border-line py-7 sm:py-8">
+          <div className="flex flex-col gap-6 sm:flex-row sm:items-end sm:justify-between">
+            <div>
+              <p className="text-base font-black text-white">Talkietiv</p>
+              <p className="mt-1 text-sm text-slate-400">Private rooms. Instant voice.</p>
+              <p className="mt-3 text-sm text-white">&copy; Talkietiv 2026</p>
+            </div>
+
+            <nav aria-label="Footer navigation" className="flex max-w-xl flex-wrap gap-x-5 gap-y-3 text-sm">
+              <Link to={SEO_PAGES.onlineWalkieTalkie.path} className="text-slate-400 hover:text-mint">
+                Online walkie-talkie
+              </Link>
+              <Link to={SEO_PAGES.voiceChatWithoutAccount.path} className="text-slate-400 hover:text-mint">
+                Voice chat, no account
+              </Link>
+              <Link to={SEO_PAGES.groupVoiceChat.path} className="text-slate-400 hover:text-mint">
+                Group voice chat
+              </Link>
+              <a href="/sitemap.xml" className="font-semibold text-slate-100 hover:text-mint">
+                Sitemap
+              </a>
+            </nav>
+          </div>
+        </footer>
       </div>
     </main>
   );
