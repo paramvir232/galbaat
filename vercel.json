@@ -9,7 +9,7 @@
       "headers": [
         {
           "key": "Content-Security-Policy",
-          "value": "default-src 'self'; base-uri 'self'; object-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://galbaat-backend.onrender.com https://api.talkietiv.com; media-src 'self' blob: https://galbaat-backend.onrender.com https://api.talkietiv.com; font-src 'self' data:; connect-src 'self' https://galbaat-backend.onrender.com wss://galbaat-backend.onrender.com https://api.talkietiv.com wss://api.talkietiv.com; worker-src 'self' blob:; manifest-src 'self'; frame-ancestors 'none'; form-action 'self'; upgrade-insecure-requests"
+          "value": "default-src 'self'; base-uri 'self'; object-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://talkietiv-a2ta.onrender.com https://api.talkietiv.com; media-src 'self' blob: https://talkietiv-a2ta.onrender.com https://api.talkietiv.com; font-src 'self' data:; connect-src 'self' https://talkietiv-a2ta.onrender.com wss://talkietiv-a2ta.onrender.com https://api.talkietiv.com wss://api.talkietiv.com; worker-src 'self' blob:; manifest-src 'self'; frame-ancestors 'none'; form-action 'self'; upgrade-insecure-requests"
         },
         {
           "key": "Permissions-Policy",
