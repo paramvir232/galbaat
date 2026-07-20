@@ -385,8 +385,6 @@ export function useWebRtcRoom(socket, roomId) {
           stopTabAudioShare().catch(() => {});
         };
         await syncDisplayAudioTrackToPeers(audioTrack);
-        setTabAudioSharing(true);
-        socket?.emit("participant:music", { roomId, sharing: true });
       }
       screenTrack.onended = () => {
         stopVideo().catch(() => {});
@@ -398,7 +396,7 @@ export function useWebRtcRoom(socket, roomId) {
       setMediaError("Screen share permission is required.");
       throw error;
     }
-  }, [ensureMedia, refreshLocalStreamState, roomId, socket, stopTabAudioShare, stopVideo, syncDisplayAudioTrackToPeers, syncVideoTrackToPeers]);
+  }, [ensureMedia, refreshLocalStreamState, stopTabAudioShare, stopVideo, syncDisplayAudioTrackToPeers, syncVideoTrackToPeers]);
 
 
 

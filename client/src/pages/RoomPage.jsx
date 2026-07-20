@@ -48,7 +48,6 @@ export default function RoomPage() {
     screenSharing,
     localStream,
     remoteStreams,
-    mediaError,
     autoplayBlocked
   } = useWebRtcRoom(socket, roomId);
   const [room, setRoom] = useState(null);
@@ -115,8 +114,9 @@ export default function RoomPage() {
   }, [participantsCollapsed]);
 
   useEffect(() => {
-    videoEnabledRef.current = videoEnabled;
-  }, [videoEnabled]);
+    // A screen track uses the local video pipeline, but it is not camera video.
+    videoEnabledRef.current = videoEnabled && !screenSharing;
+  }, [screenSharing, videoEnabled]);
 
   useEffect(() => {
     const optimisticUploadUrls = optimisticUploadUrlsRef.current;
@@ -882,16 +882,20 @@ export default function RoomPage() {
     setVideoBusy(true);
     setError("");
     try {
-      if (videoEnabled) {
+      if (videoEnabled && !screenSharing) {
         await stopVideo();
         socket.emit("participant:video", { roomId, video: false });
         socket.emit("participant:screen", { roomId, sharing: false });
       } else {
+        if (screenSharing) {
+          await stopVideo();
+          socket.emit("participant:screen", { roomId, sharing: false });
+        }
         await startVideo();
         socket.emit("participant:video", { roomId, video: true });
       }
     } catch (err) {
-      setError(err.message || "Unable to toggle camera");
+      window.console.warn("Unable to toggle camera", err);
     } finally {
       setVideoBusy(false);
     }
@@ -911,10 +915,11 @@ export default function RoomPage() {
           await stopTabAudioShare();
         }
         await startScreenShare();
+        socket.emit("participant:video", { roomId, video: false });
         socket.emit("participant:screen", { roomId, sharing: true });
       }
     } catch (err) {
-      setError(err.message || "Unable to share screen");
+      window.console.warn("Unable to share screen", err);
     } finally {
       setVideoBusy(false);
     }
@@ -936,7 +941,7 @@ export default function RoomPage() {
         await startTabAudioShare();
       }
     } catch (err) {
-      setError(err.message || "Unable to toggle music share");
+      window.console.warn("Unable to toggle music share", err);
     } finally {
       setTabAudioBusy(false);
     }
@@ -1126,12 +1131,12 @@ export default function RoomPage() {
               disabled={!connected || videoBusy}
               onClick={toggleVideo}
               className={`inline-flex min-h-11 items-center justify-center gap-2 rounded-full border px-3 py-2 text-xs font-medium transition disabled:cursor-not-allowed disabled:opacity-60 sm:min-h-0 sm:px-4 sm:text-sm ${
-                videoEnabled ? "border-mint/40 bg-mint/10 text-mint" : "border-line bg-white/[0.04] text-slate-300 hover:bg-white/10"
+                videoEnabled && !screenSharing ? "border-mint/40 bg-mint/10 text-mint" : "border-line bg-white/[0.04] text-slate-300 hover:bg-white/10"
               }`}
             >
-              {videoBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : videoEnabled ? <Video className="h-4 w-4" /> : <VideoOff className="h-4 w-4" />}
-              <span className="sm:hidden">{videoEnabled ? "Camera" : "Camera"}</span>
-              <span className="hidden sm:inline">{videoEnabled ? "Camera on" : "Camera off"}</span>
+              {videoBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : videoEnabled && !screenSharing ? <Video className="h-4 w-4" /> : <VideoOff className="h-4 w-4" />}
+              <span className="sm:hidden">Camera</span>
+              <span className="hidden sm:inline">{videoEnabled && !screenSharing ? "Camera on" : "Camera off"}</span>
             </button>
             <button
               type="button"
@@ -1193,9 +1198,9 @@ export default function RoomPage() {
             )}
           </div>
 
-          {(error || mediaError) && (
+          {error && (
             <p className="mt-6 max-w-md rounded-md border border-amberglow/30 bg-amberglow/10 p-3 text-center text-sm text-amberglow">
-              {error || mediaError}
+              {error}
             </p>
           )}
 

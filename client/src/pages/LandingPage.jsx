@@ -60,13 +60,13 @@ export default function LandingPage() {
           <motion.div initial={{ opacity: 0, y: 18 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5 }}>
             <div className="mb-5 inline-flex max-w-full items-center gap-2 rounded-full border border-line bg-white/[0.05] px-3 py-2 text-xs text-slate-300 sm:mb-6 sm:px-4 sm:text-sm">
               <Sparkles className="h-4 w-4 text-amberglow" />
-              <span className="min-w-0 truncate">Online walkie-talkie rooms for teams, friends, and quick coordination</span>
+              <span className="min-w-0 truncate">Voice • Chat • Screen Share • Whiteboard • Camera • Music</span>
             </div>
             <h1 className="max-w-3xl py-1 text-4xl font-black !leading-[1.15] tracking-normal text-white sm:text-6xl lg:text-7xl">
-              Free online walkie-talkie voice chat, no account needed
+              Free Online Voice Chat &amp; Collaboration Rooms
             </h1>
             <p className="mt-4 max-w-2xl text-base leading-7 text-slate-300 sm:mt-6 sm:text-lg sm:leading-8">
-              Talkietiv lets you create a private browser voice chat room, share the link, and hold to talk. Live voice, chat, video, screen sharing, and whiteboard collaboration are ready the moment people arrive.
+              Create private rooms instantly with voice chat, messaging, screen sharing, whiteboard, camera, music sharing, and more. No downloads. No account required.
             </p>
 
             <div className="mt-6 grid max-w-2xl grid-cols-1 gap-2 text-sm text-slate-300 min-[420px]:grid-cols-3 sm:mt-8 sm:gap-3">
@@ -200,9 +200,9 @@ export default function LandingPage() {
               <Link to={SEO_PAGES.groupVoiceChat.path} className="text-slate-400 hover:text-mint">
                 Group voice chat
               </Link>
-              <a href="/sitemap.xml" className="font-semibold text-slate-100 hover:text-mint">
-                Sitemap
-              </a>
+              <Link to={SEO_PAGES.browserVoiceChat.path} className="font-semibold text-slate-100 hover:text-mint">
+                Browser voice chat
+              </Link>
             </nav>
           </div>
         </footer>
