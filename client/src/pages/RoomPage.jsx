@@ -3,6 +3,7 @@ import { motion } from "framer-motion";
 import { ArrowLeft, FileText, Hand, Hash, Loader2, Lock, Menu, Music, PanelLeftOpen, Pencil, ScreenShare, ScreenShareOff, Settings, Unlock, Video, VideoOff, Wifi, WifiOff, X } from "lucide-react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import ChatPanel from "../components/ChatPanel.jsx";
+import BrandMark from "../components/BrandMark.jsx";
 import ParticipantList from "../components/ParticipantList.jsx";
 import PushToTalk from "../components/PushToTalk.jsx";
 import ShareRoom from "../components/ShareRoom.jsx";
@@ -957,12 +958,13 @@ export default function RoomPage() {
     : `280px minmax(${ROOM_MIN_WIDTH}px,1fr) minmax(${MIN_CHAT_WIDTH}px,${chatWidth}px)`;
 
   return (
-    <main className="flex h-dvh min-h-0 flex-col overflow-hidden p-1.5 text-slate-100 sm:p-4">
-      <header className="glass relative z-40 mb-2 flex shrink-0 flex-col gap-2 rounded-lg px-2.5 py-2.5 sm:mb-3 sm:flex-row sm:items-center sm:justify-between sm:gap-3 sm:px-4 sm:py-3">
+    <main className="flex h-dvh min-h-0 flex-col overflow-hidden bg-black p-2 text-slate-100 sm:p-4">
+      <header className="apple-surface relative z-40 mb-2 flex shrink-0 flex-col gap-2 rounded-xl px-3 py-3 sm:mb-3 sm:flex-row sm:items-center sm:justify-between sm:gap-3 sm:px-4 sm:py-3">
         <div className="flex w-full min-w-0 flex-1 items-center gap-2 sm:w-auto sm:gap-3">
-          <Link to="/" className="grid h-11 w-11 shrink-0 place-items-center rounded-md border border-line bg-white/[0.04] text-slate-300 hover:bg-white/10 sm:h-10 sm:w-10">
+          <Link to="/" className="apple-control grid h-11 w-11 shrink-0 place-items-center rounded-md text-slate-300 sm:h-10 sm:w-10">
             <ArrowLeft className="h-4 w-4" />
           </Link>
+          <BrandMark className="h-9 w-9 sm:h-10 sm:w-10" />
           <div className="min-w-0">
             <div className="flex items-center gap-2">
               <Hash className="h-4 w-4 text-slate-500" />
@@ -982,7 +984,7 @@ export default function RoomPage() {
             type="button"
             onClick={downloadTranscript}
             title="Download transcript"
-            className="grid h-11 w-11 place-items-center rounded-md border border-line bg-white/[0.05] text-slate-200 hover:bg-white/10 sm:h-10 sm:w-10"
+            className="apple-control grid h-11 w-11 place-items-center rounded-[14px] text-slate-200 sm:h-10 sm:w-10"
           >
             <FileText className="h-4 w-4" />
           </button>
@@ -998,7 +1000,7 @@ export default function RoomPage() {
                 toggleLock();
               }}
               title={room?.locked ? "Unlock room" : "Lock room"}
-              className="relative grid h-11 w-11 place-items-center rounded-md border border-line bg-white/[0.05] text-slate-200 hover:bg-white/10 sm:h-10 sm:w-10"
+              className="apple-control relative grid h-11 w-11 place-items-center rounded-[14px] text-slate-200 sm:h-10 sm:w-10"
             >
               {room?.locked ? <Lock className="h-4 w-4 text-amberglow" /> : <Unlock className="h-4 w-4" />}
               {joinRequests.length > 0 && (
@@ -1008,7 +1010,7 @@ export default function RoomPage() {
               )}
             </button>
             {joinPanelOpen && room?.locked && (
-              <div className="absolute right-0 top-12 z-[999] w-72 rounded-lg border border-line bg-panel p-3 shadow-2xl">
+              <div className="apple-surface absolute right-0 top-12 z-[999] w-72 rounded-xl p-3 shadow-2xl">
                 <div className="mb-3 flex items-center justify-between gap-2">
                   <div>
                     <p className="text-sm font-bold text-slate-100">Waiting to join</p>
@@ -1051,14 +1053,14 @@ export default function RoomPage() {
               setSettingsOpen(true);
             }}
             title="Settings"
-            className="grid h-11 w-11 place-items-center rounded-md border border-line bg-white/[0.05] text-slate-200 hover:bg-white/10 sm:h-10 sm:w-10"
+            className="apple-control grid h-11 w-11 place-items-center rounded-[14px] text-slate-200 sm:h-10 sm:w-10"
           >
             <Settings className="h-4 w-4" />
           </button>
           <button
             type="button"
             onClick={() => setMobilePanel((panel) => (panel === "room" ? "chat" : "room"))}
-            className="grid h-11 w-11 place-items-center rounded-md border border-line bg-white/[0.05] md:hidden"
+            className="apple-control grid h-11 w-11 place-items-center rounded-[14px] md:hidden"
           >
             {mobilePanel === "room" ? <Menu className="h-4 w-4" /> : <X className="h-4 w-4" />}
           </button>
@@ -1066,8 +1068,8 @@ export default function RoomPage() {
       </header>
 
       {lockedJoinPending ? (
-        <section className="grid min-h-0 flex-1 place-items-center rounded-lg border border-line bg-panel/80 p-6 text-center shadow-2xl">
-          <div className="w-full max-w-md rounded-lg border border-line bg-ink/60 p-6">
+        <section className="apple-surface grid min-h-0 flex-1 place-items-center rounded-xl p-6 text-center shadow-2xl">
+          <div className="apple-control w-full max-w-md rounded-xl bg-black/45 p-6">
             <div className="mx-auto mb-4 grid h-14 w-14 place-items-center rounded-full border border-amberglow/40 bg-amberglow/10 text-amberglow">
               <Lock className="h-6 w-6" />
             </div>
@@ -1091,7 +1093,7 @@ export default function RoomPage() {
             type="button"
             onClick={() => setParticipantsCollapsed(false)}
             title="Show participants"
-            className="absolute left-0 top-2 z-20 hidden h-10 w-10 place-items-center rounded-r-md border border-l-0 border-line bg-panel/95 text-slate-200 shadow-xl hover:bg-white/10 lg:grid"
+            className="apple-control absolute left-0 top-2 z-20 hidden h-10 w-10 place-items-center rounded-r-[14px] border-l-0 text-slate-200 shadow-xl lg:grid"
           >
             <PanelLeftOpen className="h-4 w-4" />
           </button>
@@ -1111,17 +1113,17 @@ export default function RoomPage() {
         </div>
 
         <motion.div
-          className={`${mobilePanel === "room" ? "flex" : "hidden"} glass min-h-0 flex-col items-center gap-3 overflow-y-auto rounded-lg p-2.5 sm:gap-5 sm:p-5 lg:flex xl:p-6`}
+          className={`${mobilePanel === "room" ? "flex" : "hidden"} apple-surface min-h-0 flex-col items-center gap-3 overflow-y-auto rounded-xl p-3 sm:gap-5 sm:p-5 lg:flex xl:p-6`}
         >
           <div className="grid w-full grid-cols-2 gap-2 sm:flex sm:flex-wrap sm:items-center sm:justify-center sm:gap-3">
-            <div className="inline-flex min-h-11 items-center justify-center gap-2 rounded-full border border-line bg-white/[0.04] px-3 py-2 text-xs text-slate-300 sm:min-h-0 sm:px-4 sm:text-sm">
+            <div className="apple-control inline-flex min-h-11 items-center justify-center gap-2 rounded-full bg-white/[0.045] px-3 py-2 text-xs text-slate-300 sm:min-h-0 sm:px-4 sm:text-sm">
               {connected ? <Wifi className="h-4 w-4 text-mint" /> : <WifiOff className="h-4 w-4 text-amberglow" />}
               {participants.length} online
             </div>
             <button
               type="button"
               onClick={() => setWhiteboardOpen(true)}
-              className="inline-flex min-h-11 items-center justify-center gap-2 rounded-full border border-line bg-white/[0.04] px-3 py-2 text-xs font-medium text-slate-300 transition hover:bg-white/10 sm:min-h-0 sm:px-4 sm:text-sm"
+              className="apple-control inline-flex min-h-11 items-center justify-center gap-2 rounded-full bg-white/[0.045] px-3 py-2 text-xs font-medium text-slate-300 sm:min-h-0 sm:px-4 sm:text-sm"
             >
               <Pencil className={`h-4 w-4 ${audioEnabled ? "text-mint" : "text-slate-400"}`} />
               Whiteboard
@@ -1131,7 +1133,7 @@ export default function RoomPage() {
               disabled={!connected || videoBusy}
               onClick={toggleVideo}
               className={`inline-flex min-h-11 items-center justify-center gap-2 rounded-full border px-3 py-2 text-xs font-medium transition disabled:cursor-not-allowed disabled:opacity-60 sm:min-h-0 sm:px-4 sm:text-sm ${
-                videoEnabled && !screenSharing ? "border-mint/40 bg-mint/10 text-mint" : "border-line bg-white/[0.04] text-slate-300 hover:bg-white/10"
+                videoEnabled && !screenSharing ? "border-mint/40 bg-mint/10 text-mint" : "apple-control bg-white/[0.045] text-slate-300"
               }`}
             >
               {videoBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : videoEnabled && !screenSharing ? <Video className="h-4 w-4" /> : <VideoOff className="h-4 w-4" />}
@@ -1143,7 +1145,7 @@ export default function RoomPage() {
               disabled={!connected || tabAudioBusy}
               onClick={toggleTabAudioShare}
               className={`inline-flex min-h-11 items-center justify-center gap-2 rounded-full border px-3 py-2 text-xs font-medium transition disabled:cursor-not-allowed disabled:opacity-60 sm:min-h-0 sm:px-4 sm:text-sm ${
-                tabAudioSharing ? "border-mint/40 bg-mint/10 text-mint" : "border-line bg-white/[0.04] text-slate-300 hover:bg-white/10"
+                tabAudioSharing ? "border-mint/40 bg-mint/10 text-mint" : "apple-control bg-white/[0.045] text-slate-300"
               }`}
             >
               {tabAudioBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Music className="h-4 w-4" />}
@@ -1155,7 +1157,7 @@ export default function RoomPage() {
               disabled={!connected || videoBusy}
               onClick={toggleScreenShare}
               className={`inline-flex min-h-11 items-center justify-center gap-2 rounded-full border px-3 py-2 text-xs font-medium transition disabled:cursor-not-allowed disabled:opacity-60 sm:min-h-0 sm:px-4 sm:text-sm ${
-                screenSharing ? "border-mint/40 bg-mint/10 text-mint" : "border-line bg-white/[0.04] text-slate-300 hover:bg-white/10"
+                screenSharing ? "border-mint/40 bg-mint/10 text-mint" : "apple-control bg-white/[0.045] text-slate-300"
               }`}
             >
               {screenSharing ? <ScreenShareOff className="h-4 w-4" /> : <ScreenShare className="h-4 w-4" />}
@@ -1237,8 +1239,8 @@ export default function RoomPage() {
       )}
 
       {settingsOpen && (
-        <div className="fixed inset-0 z-50 grid place-items-center bg-ink/70 p-4 backdrop-blur-sm">
-          <form onSubmit={saveDisplayName} className="w-full max-w-sm rounded-lg border border-line bg-panel p-4 shadow-2xl">
+        <div className="fixed inset-0 z-50 grid place-items-center bg-black/75 p-4 backdrop-blur-md">
+          <form onSubmit={saveDisplayName} className="apple-surface w-full max-w-sm rounded-xl p-5 shadow-2xl">
             <div className="mb-4 flex items-center justify-between gap-3">
               <div>
                 <h2 className="text-base font-bold text-slate-100">Settings</h2>

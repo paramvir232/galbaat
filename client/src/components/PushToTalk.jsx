@@ -24,12 +24,12 @@ export default function PushToTalk({ active, compact, locked, muted, selfMuted, 
         }}
         whileTap={{ scale: 0.96 }}
         animate={{
-          boxShadow: active ? "0 0 0 16px rgba(41,211,167,0.08), 0 0 70px rgba(41,211,167,0.35)" : "0 0 36px rgba(138,180,255,0.12)"
+          boxShadow: active ? "0 0 0 16px rgba(255,138,0,0.12), 0 0 70px rgba(255,138,0,0.28)" : "0 16px 42px rgba(0,0,0,0.42)"
         }}
         className={`grid aspect-square ${compact ? "w-[min(46vw,150px)] sm:w-[min(42vw,160px)]" : "w-[min(64vw,240px)] sm:w-[min(58vw,280px)]"} max-w-full place-items-center rounded-full border text-center transition ${
           active
             ? "border-mint bg-mint text-ink"
-            : "border-line bg-white/[0.06] text-slate-100 hover:border-skyglass/60 hover:bg-white/[0.09]"
+            : "border-line bg-white/[0.055] text-slate-100 hover:border-white/30 hover:bg-white/[0.09]"
         } disabled:cursor-not-allowed disabled:opacity-50`}
         aria-label="Hold to talk"
       >

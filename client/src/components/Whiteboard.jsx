@@ -31,6 +31,7 @@ import {
   Volume2,
   X
 } from "lucide-react";
+import BrandMark from "./BrandMark";
 
 const TOOLS = [
   { id: "select", label: "Select", icon: MousePointer2, key: "V" },
@@ -46,8 +47,8 @@ const TOOLS = [
   { id: "text", label: "Text", icon: Type, key: "T" }
 ];
 
-const COLORS = ["#f8fafc", "#29d3a7", "#8ab4ff", "#f59e0b", "#fb7185", "#a78bfa", "#22d3ee", "#111827"];
-const PEN_CURSOR = `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='18' height='18' viewBox='0 0 18 18'%3E%3Ccircle cx='9' cy='9' r='4' fill='%2329d3a7' stroke='%2308111f' stroke-width='2'/%3E%3C/svg%3E") 9 9, crosshair`;
+const COLORS = ["#FFFFFF", "#FF8A00", "#F5F5F7", "#8E8E93", "#FF453A", "#AF52DE", "#64D2FF", "#111111"];
+const PEN_CURSOR = `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='18' height='18' viewBox='0 0 18 18'%3E%3Ccircle cx='9' cy='9' r='4' fill='%23FF8A00' stroke='%23000000' stroke-width='2'/%3E%3C/svg%3E") 9 9, crosshair`;
 
 function makeId() {
   return `wb-${Date.now()}-${Math.random().toString(36).slice(2)}`;
@@ -1050,13 +1051,16 @@ export default function Whiteboard({ open, roomId, socket, currentUser, particip
   const currentBoardUser = boardVoiceUsers.find((user) => user.id === currentUser?.id) || currentUser;
 
   return (
-    <div className="fixed inset-0 z-50 flex flex-col bg-ink text-slate-100">
-      <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-line bg-panel/95 px-3 py-2">
-        <div className="min-w-0">
-          <h2 className="text-sm font-black">Talkietiv Whiteboard</h2>
+    <div className="fixed inset-0 z-50 flex flex-col bg-black text-slate-100">
+      <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-line bg-black/90 px-3 py-2.5 backdrop-blur-xl">
+        <div className="flex min-w-0 items-center gap-2.5">
+          <BrandMark className="h-8 w-8" />
+          <div>
+          <h2 className="text-sm font-bold tracking-tight">Talkietiv Whiteboard</h2>
           <p className="text-xs text-slate-400">Board {roomId} - Autosaves as you draw</p>
+          </div>
         </div>
-        <div className="flex max-w-full flex-wrap items-center justify-center gap-1 rounded-lg border border-line bg-ink/60 p-1">
+        <div className="apple-control flex max-w-full flex-wrap items-center justify-center gap-1 rounded-[16px] bg-black/55 p-1">
           {TOOLS.map((item) => {
             const Icon = item.icon;
             return (
@@ -1066,7 +1070,7 @@ export default function Whiteboard({ open, roomId, socket, currentUser, particip
                 onClick={() => setTool(item.id)}
                 disabled={!canEditBoard && item.id !== "hand"}
                 title={`${item.label} (${item.key})`}
-                className={`grid h-9 w-9 place-items-center rounded-md transition disabled:cursor-not-allowed disabled:opacity-40 ${tool === item.id ? "bg-mint text-ink" : "text-slate-300 hover:bg-white/10"}`}
+              className={`grid h-9 w-9 place-items-center rounded-[10px] transition disabled:cursor-not-allowed disabled:opacity-40 ${tool === item.id ? "bg-mint text-ink" : "text-slate-300 hover:bg-white/10"}`}
               >
                 <Icon className="h-4 w-4" />
               </button>
@@ -1088,14 +1092,14 @@ export default function Whiteboard({ open, roomId, socket, currentUser, particip
             <button
               type="button"
               onClick={() => setExportMenuOpen((openMenu) => !openMenu)}
-              className="grid h-10 w-10 place-items-center rounded-md border border-line bg-white/[0.04] text-slate-200 hover:bg-white/10"
+              className="apple-control grid h-10 w-10 place-items-center rounded-[14px] text-slate-200"
               aria-label="Download whiteboard"
               title="Download whiteboard"
             >
               <Download className="h-4 w-4" />
             </button>
             {exportMenuOpen && (
-              <div className="absolute right-0 top-12 z-50 w-52 overflow-hidden rounded-lg border border-line bg-panel shadow-2xl">
+              <div className="apple-surface absolute right-0 top-12 z-50 w-52 overflow-hidden rounded-xl shadow-2xl">
                 <button type="button" onClick={downloadAsImage} className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-sm text-slate-200 hover:bg-white/10">
                   <FileImage className="h-4 w-4 text-mint" />
                   Download as image
@@ -1111,7 +1115,7 @@ export default function Whiteboard({ open, roomId, socket, currentUser, particip
               </div>
             )}
           </div>
-          <button type="button" onClick={onClose} className="grid h-10 w-10 place-items-center rounded-md border border-line bg-white/[0.04] hover:bg-white/10" aria-label="Close whiteboard">
+          <button type="button" onClick={onClose} className="apple-control grid h-10 w-10 place-items-center rounded-[14px]" aria-label="Close whiteboard">
             <X className="h-4 w-4" />
           </button>
         </div>

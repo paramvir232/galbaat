@@ -1,6 +1,7 @@
-import { ArrowRight, Radio } from "lucide-react";
+import { ArrowRight } from "lucide-react";
 import { Link } from "react-router-dom";
 import { SITE_NAME, usePageMeta } from "../lib/seo.js";
+import BrandMark from "../components/BrandMark.jsx";
 
 export default function SeoPage({ page }) {
   usePageMeta(page);
@@ -8,17 +9,15 @@ export default function SeoPage({ page }) {
   return (
     <main className="min-h-screen overflow-x-hidden px-4 py-4 text-slate-100 sm:px-6 sm:py-6 lg:px-8">
       <div className="mx-auto max-w-5xl">
-        <nav className="flex items-center justify-between gap-4 border-b border-line pb-4 sm:pb-5">
+        <nav className="apple-surface flex items-center justify-between gap-4 rounded-xl px-4 py-3 sm:px-5">
           <Link to="/" className="flex items-center gap-3" aria-label={`${SITE_NAME} home`}>
-            <span className="grid h-10 w-10 place-items-center rounded-lg bg-mint text-ink">
-              <Radio className="h-5 w-5" />
-            </span>
+            <BrandMark className="h-10 w-10" />
             <span>
               <span className="block text-lg font-black">{SITE_NAME}</span>
               <span className="block text-xs text-slate-400">Live rooms, instant voice</span>
             </span>
           </Link>
-          <Link to="/" className="inline-flex shrink-0 items-center gap-2 rounded-md bg-mint px-3 py-2 text-sm font-bold text-ink hover:bg-mint/90 sm:px-4">
+          <Link to="/" className="inline-flex shrink-0 items-center gap-2 rounded-md bg-mint px-3 py-2 text-sm font-bold text-black shadow-glow hover:bg-[#ff9d2f] sm:px-4">
             Create room
             <ArrowRight className="h-4 w-4" />
           </Link>

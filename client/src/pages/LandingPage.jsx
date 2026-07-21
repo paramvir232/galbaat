@@ -1,10 +1,11 @@
 import { useState } from "react";
 import { motion } from "framer-motion";
-import { ChevronDown, Headphones, LogIn, Plus, Radio, Sparkles } from "lucide-react";
+import { ChevronDown, Headphones, LogIn, Plus, Sparkles } from "lucide-react";
 import { Link, useNavigate } from "react-router-dom";
 import { createRoom } from "../lib/api";
 import { getGuestName, setGuestName } from "../lib/guest";
 import { FAQ_ITEMS, HOME_META, SEO_PAGES, usePageMeta } from "../lib/seo.js";
+import BrandMark from "../components/BrandMark.jsx";
 
 export default function LandingPage() {
   const [roomName, setRoomName] = useState("");
@@ -41,24 +42,22 @@ export default function LandingPage() {
   return (
     <main className="min-h-screen overflow-x-hidden px-4 py-4 text-slate-100 sm:px-6 sm:py-6 lg:px-8">
       <div className="mx-auto flex min-h-[calc(100vh-2rem)] max-w-6xl flex-col sm:min-h-[calc(100vh-3rem)]">
-        <nav className="flex flex-wrap items-center justify-between gap-3">
+        <nav className="apple-surface flex flex-wrap items-center justify-between gap-3 rounded-xl px-4 py-3 sm:px-5">
           <div className="flex items-center gap-3">
-            <div className="grid h-10 w-10 place-items-center rounded-lg bg-mint text-ink sm:h-11 sm:w-11">
-              <Radio className="h-5 w-5 sm:h-6 sm:w-6" />
-            </div>
+            <BrandMark className="h-10 w-10 sm:h-11 sm:w-11" />
             <div>
               <p className="text-lg font-black tracking-normal sm:text-xl">Talkietiv</p>
               <p className="text-xs text-slate-400">Live rooms, instant voice</p>
             </div>
           </div>
-          <span className="hidden rounded-full border border-line bg-white/[0.04] px-4 py-2 text-sm text-slate-300 sm:inline-flex">
+          <span className="apple-control hidden rounded-full px-4 py-2 text-sm text-slate-300 sm:inline-flex">
             No accounts. No waiting.
           </span>
         </nav>
 
-        <section className="grid flex-1 items-center gap-6 py-8 sm:py-10 lg:grid-cols-[1.08fr_0.92fr]">
+        <section className="grid flex-1 items-center gap-8 py-10 sm:py-14 lg:grid-cols-[1.08fr_0.92fr]">
           <motion.div initial={{ opacity: 0, y: 18 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5 }}>
-            <div className="mb-5 inline-flex max-w-full items-center gap-2 rounded-full border border-line bg-white/[0.05] px-3 py-2 text-xs text-slate-300 sm:mb-6 sm:px-4 sm:text-sm">
+            <div className="apple-control mb-5 inline-flex max-w-full items-center gap-2 rounded-full px-3 py-2 text-xs text-slate-300 sm:mb-6 sm:px-4 sm:text-sm">
               <Sparkles className="h-4 w-4 text-amberglow" />
               <span className="min-w-0 truncate">Voice • Chat • Screen Share • Whiteboard • Camera • Music</span>
             </div>
@@ -71,7 +70,7 @@ export default function LandingPage() {
 
             <div className="mt-6 grid max-w-2xl grid-cols-1 gap-2 text-sm text-slate-300 min-[420px]:grid-cols-3 sm:mt-8 sm:gap-3">
               {["Push-to-talk", "Voice chat, no account", "Live collaboration"].map((item) => (
-                <div key={item} className="rounded-lg border border-line bg-white/[0.04] px-3 py-3 text-center sm:px-4">
+                <div key={item} className="apple-control rounded-lg px-3 py-3 text-center sm:px-4">
                   {item}
                 </div>
               ))}
@@ -82,10 +81,10 @@ export default function LandingPage() {
             initial={{ opacity: 0, scale: 0.98 }}
             animate={{ opacity: 1, scale: 1 }}
             transition={{ duration: 0.5, delay: 0.1 }}
-            className="glass rounded-lg p-4 shadow-2xl sm:p-5"
+            className="apple-surface rounded-xl p-5 shadow-2xl sm:p-6"
           >
             <div className="mb-5 flex items-center gap-3">
-              <div className="grid h-11 w-11 shrink-0 place-items-center rounded-lg bg-skyglass/15 text-skyglass sm:h-12 sm:w-12">
+              <div className="grid h-11 w-11 shrink-0 place-items-center rounded-lg bg-white/[0.08] text-mint sm:h-12 sm:w-12">
                 <Headphones className="h-5 w-5 sm:h-6 sm:w-6" />
               </div>
               <div>
@@ -99,7 +98,7 @@ export default function LandingPage() {
               <input
                 value={username}
                 onChange={(event) => setUsername(event.target.value)}
-                className="w-full rounded-md border border-line bg-ink/60 px-4 py-3 text-base text-slate-100 outline-none ring-mint/30 focus:ring-4 sm:text-sm"
+                className="w-full rounded-md border border-line bg-black/60 px-4 py-3 text-base text-slate-100 outline-none ring-mint/30 focus:border-mint/70 focus:ring-4 sm:text-sm"
                 maxLength={24}
               />
             </label>
@@ -111,13 +110,13 @@ export default function LandingPage() {
                   value={roomName}
                   onChange={(event) => setRoomName(event.target.value)}
                   placeholder="Evening standup"
-                  className="w-full rounded-md border border-line bg-ink/60 px-4 py-3 text-base text-slate-100 outline-none ring-mint/30 placeholder:text-slate-500 focus:ring-4 sm:text-sm"
+                  className="w-full rounded-md border border-line bg-black/60 px-4 py-3 text-base text-slate-100 outline-none ring-mint/30 placeholder:text-slate-500 focus:border-mint/70 focus:ring-4 sm:text-sm"
                   maxLength={64}
                 />
               </label>
               <button
                 disabled={busy}
-                className="inline-flex w-full items-center justify-center gap-2 rounded-md bg-mint px-4 py-3 font-bold text-ink hover:bg-mint/90 disabled:opacity-60"
+                className="inline-flex w-full items-center justify-center gap-2 rounded-md bg-mint px-4 py-3 font-bold text-black shadow-glow hover:bg-[#ff9d2f] disabled:opacity-60"
               >
                 <Plus className="h-5 w-5" />
                 Create Room
@@ -135,10 +134,10 @@ export default function LandingPage() {
                 value={joinCode}
                 onChange={(event) => setJoinCode(event.target.value)}
                 placeholder="Room code"
-                className="w-full rounded-md border border-line bg-ink/60 px-4 py-3 text-base uppercase text-slate-100 outline-none ring-skyglass/30 placeholder:normal-case placeholder:text-slate-500 focus:ring-4 sm:text-sm"
+                className="w-full rounded-md border border-line bg-black/60 px-4 py-3 text-base uppercase text-slate-100 outline-none ring-mint/30 placeholder:normal-case placeholder:text-slate-500 focus:border-mint/70 focus:ring-4 sm:text-sm"
                 maxLength={12}
               />
-              <button className="inline-flex w-full items-center justify-center gap-2 rounded-md border border-line bg-white/[0.06] px-4 py-3 font-bold text-slate-100 hover:bg-white/10">
+              <button className="apple-control inline-flex w-full items-center justify-center gap-2 rounded-md px-4 py-3 font-bold text-slate-100">
                 <LogIn className="h-5 w-5" />
                 Join Room
               </button>

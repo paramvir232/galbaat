@@ -5,7 +5,7 @@ export default function ParticipantList({ participants, selfId, isHost = false, 
   const [openVolumeId, setOpenVolumeId] = useState(null);
 
   return (
-    <aside className="glass flex h-full min-h-0 flex-col rounded-lg p-2.5 sm:p-4">
+    <aside className="apple-surface flex h-full min-h-0 flex-col rounded-xl p-3 sm:p-4">
       <div className="mb-3 flex items-center justify-between gap-2 sm:mb-4">
         <h2 className="text-sm font-semibold text-slate-100">Participants</h2>
         <div className="flex items-center gap-1.5">
@@ -29,8 +29,8 @@ export default function ParticipantList({ participants, selfId, isHost = false, 
           return (
           <div
             key={user.id}
-            className={`grid min-h-[4.5rem] grid-cols-[auto_minmax(0,1fr)_auto] items-start gap-2 rounded-lg border p-2.5 sm:gap-3 sm:p-3 ${
-              user.speaking ? "border-mint/45 bg-mint/10 shadow-glow" : "border-line bg-white/[0.03]"
+            className={`grid min-h-[4.5rem] grid-cols-[auto_minmax(0,1fr)_auto] items-start gap-2 rounded-[16px] border p-2.5 shadow-sm sm:gap-3 sm:p-3 ${
+              user.speaking ? "border-mint/45 bg-mint/10 shadow-glow" : "border-line bg-white/[0.045]"
             }`}
           >
             <div className="relative grid h-10 w-10 shrink-0 place-items-center rounded-lg bg-slate-800 text-sm font-bold text-slate-100">

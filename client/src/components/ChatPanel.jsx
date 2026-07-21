@@ -615,9 +615,9 @@ export default function ChatPanel({
     : [];
 
   return (
-    <aside className="glass flex h-full min-h-0 min-w-0 flex-col overflow-hidden rounded-lg">
-      <div className="shrink-0 border-b border-line p-3 sm:p-4">
-        <h2 className="text-sm font-semibold text-slate-100">Room Chat</h2>
+    <aside className="apple-surface flex h-full min-h-0 min-w-0 flex-col overflow-hidden rounded-xl">
+      <div className="shrink-0 border-b border-line px-4 py-4 sm:px-5">
+        <h2 className="text-sm font-semibold tracking-tight text-slate-100">Room Chat</h2>
         <p className="mt-1 min-h-4 text-xs text-slate-400">
           {typingUsers.length ? `${typingUsers.join(", ")} typing...` : "Messages sync for everyone here"}
         </p>
@@ -646,14 +646,14 @@ export default function ChatPanel({
                 if (reactionAllowed) setReactionPickerId(message.id);
               }}
               onMouseLeave={() => setReactionPickerId((id) => (id === message.id ? null : id))}
-              className={`group relative w-fit min-w-0 max-w-[92%] rounded-lg border px-3 py-2 sm:max-w-[82%] ${
+              className={`group relative w-fit min-w-0 max-w-[92%] rounded-[18px] border px-3.5 py-2.5 shadow-sm sm:max-w-[82%] ${
                 isSystem
                   ? "border-transparent bg-white/[0.03] text-center"
                   : mentioned
                     ? "border-amberglow/40 bg-amberglow/10"
                     : isOwn
-                      ? "rounded-br-sm border-mint/20 bg-mint/15"
-                      : "rounded-bl-sm border-transparent bg-white/[0.04]"
+                      ? "rounded-br-md border-mint/35 bg-mint/15"
+                      : "rounded-bl-md border-white/[0.06] bg-white/[0.055]"
               } ${isDeleted ? "border-dashed bg-white/[0.025]" : ""}`}
             >
               <div className="mb-0.5 flex items-center justify-between gap-3">
@@ -772,7 +772,7 @@ export default function ChatPanel({
         <div ref={endRef} />
       </div>
 
-      <form onSubmit={submit} onPaste={handlePaste} className="relative shrink-0 border-t border-line p-2.5 sm:p-3">
+      <form onSubmit={submit} onPaste={handlePaste} className="relative shrink-0 border-t border-line p-3 sm:p-4">
         {showEmojis && (
           <div className="absolute bottom-16 left-2.5 z-20 grid grid-cols-5 gap-1 rounded-lg border border-line bg-panel p-2 shadow-2xl sm:left-3">
             {EMOJIS.map((emoji) => (
@@ -825,7 +825,7 @@ export default function ChatPanel({
             ))}
           </div>
         )}
-        <div className="flex min-w-0 items-center gap-1 rounded-lg border border-line bg-ink/50 p-1.5 sm:gap-2 sm:p-2">
+        <div className="apple-control flex min-w-0 items-center gap-1.5 rounded-[18px] bg-black/45 p-1.5 sm:gap-2 sm:p-2">
           <button
             type="button"
             title="Emoji"

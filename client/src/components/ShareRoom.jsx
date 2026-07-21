@@ -12,10 +12,10 @@ export default function ShareRoom({ roomId }) {
   const qrPopover = showQr
     ? createPortal(
         <div
-          className="fixed z-[9999] rounded-lg border border-line bg-slate-950 p-3 shadow-2xl"
+          className="apple-surface fixed z-[9999] rounded-xl p-3 shadow-2xl"
           style={qrPosition}
         >
-          <QRCodeSVG value={inviteUrl} size={152} bgColor="#020617" fgColor="#e5edf7" />
+          <QRCodeSVG value={inviteUrl} size={152} bgColor="#FFFFFF" fgColor="#000000" />
         </div>,
         document.body
       )
@@ -43,7 +43,7 @@ export default function ShareRoom({ roomId }) {
       <button
         type="button"
         onClick={copyInvite}
-        className="inline-flex h-11 min-w-11 items-center justify-center gap-2 rounded-md border border-line bg-white/[0.05] px-3 text-sm text-slate-200 hover:bg-white/10 sm:h-10"
+        className="apple-control inline-flex h-11 min-w-11 items-center justify-center gap-2 rounded-[14px] px-3 text-sm text-slate-200 sm:h-10"
         title={copied ? "Copied" : "Copy link"}
       >
         {copied ? <Check className="h-4 w-4 text-mint" /> : <Copy className="h-4 w-4" />}
@@ -53,7 +53,7 @@ export default function ShareRoom({ roomId }) {
         ref={qrButtonRef}
         type="button"
         onClick={toggleQr}
-        className="grid h-11 w-11 place-items-center rounded-md border border-line bg-white/[0.05] text-slate-200 hover:bg-white/10 sm:h-10 sm:w-10"
+        className="apple-control grid h-11 w-11 place-items-center rounded-[14px] text-slate-200 sm:h-10 sm:w-10"
         title="Show QR code"
       >
         {showQr ? <Link2 className="h-4 w-4" /> : <QrCode className="h-4 w-4" />}

@@ -30,7 +30,7 @@ function VideoTile({ stream, mediaKey, label, muted = false, mirrored = false, s
       tabIndex={onExpand ? 0 : undefined}
       onClick={onExpand}
       onKeyDown={handleKeyDown}
-      className={`group relative aspect-video w-full overflow-hidden rounded-lg border border-line bg-ink/70 text-left outline-none ${onExpand ? "cursor-zoom-in hover:border-mint/50 focus-visible:border-mint/70" : ""}`}
+      className={`group relative aspect-video w-full overflow-hidden rounded-xl border border-line bg-black text-left shadow-2xl outline-none ${onExpand ? "cursor-zoom-in hover:border-mint/50 focus-visible:border-mint/70" : ""}`}
     >
       {stream ? (
         <video

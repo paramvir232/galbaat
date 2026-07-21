@@ -4,18 +4,23 @@ export default {
   theme: {
     extend: {
       fontFamily: {
-        sans: ["Inter", "ui-sans-serif", "system-ui", "sans-serif"]
+        sans: ["SF Pro Display", "SF Pro Text", "Inter", "-apple-system", "BlinkMacSystemFont", "Segoe UI", "sans-serif"]
       },
       colors: {
-        ink: "#0c111d",
-        panel: "#121a2b",
-        line: "rgba(148, 163, 184, 0.18)",
-        mint: "#29d3a7",
-        skyglass: "#8ab4ff",
-        amberglow: "#ffb86b"
+        ink: "#000000",
+        panel: "#111111",
+        line: "rgba(255, 255, 255, 0.12)",
+        mint: "#ff8a00",
+        skyglass: "#f5f5f7",
+        amberglow: "#ff8a00"
+      },
+      borderRadius: {
+        md: "1rem",
+        lg: "1.25rem",
+        xl: "1.5rem"
       },
       boxShadow: {
-        glow: "0 0 36px rgba(41, 211, 167, 0.22)"
+        glow: "0 14px 36px rgba(255, 138, 0, 0.18)"
       }
     }
   },
