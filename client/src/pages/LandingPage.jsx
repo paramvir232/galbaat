@@ -44,7 +44,7 @@ export default function LandingPage() {
       <div className="mx-auto flex min-h-[calc(100vh-2rem)] max-w-6xl flex-col sm:min-h-[calc(100vh-3rem)]">
         <nav className="apple-surface flex flex-wrap items-center justify-between gap-3 rounded-xl px-4 py-3 sm:px-5">
           <div className="flex items-center gap-3">
-            <BrandMark className="w-[100px] sm:w-[150px] h-auto" />
+            <BrandMark className="w-[140px] sm:w-[170px] h-auto" />
           </div>
           <span className="apple-control hidden rounded-full px-4 py-2 text-sm text-slate-300 sm:inline-flex">
             No accounts. No waiting.
