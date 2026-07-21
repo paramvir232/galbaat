@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { motion } from "framer-motion";
-import { ChevronDown, Headphones, LogIn, Plus, Sparkles } from "lucide-react";
+import { ChevronDown, Headphones, Instagram, LogIn, Plus, Sparkles } from "lucide-react";
 import { Link, useNavigate } from "react-router-dom";
 import { createRoom } from "../lib/api";
 import { getGuestName, setGuestName } from "../lib/guest";
@@ -177,30 +177,50 @@ export default function LandingPage() {
           </div>
         </section>
 
-        <footer className="border-t border-line py-7 sm:py-8">
-          <div className="flex flex-col gap-6 sm:flex-row sm:items-end sm:justify-between">
-            <div>
-              <p className="text-base font-black text-white">Talkietiv</p>
-              <p className="mt-1 text-sm text-slate-400">Private rooms. Instant voice.</p>
-              <p className="mt-3 text-sm text-white">&copy; Talkietiv 2026</p>
+        <footer className="mt-auto pt-10 pb-8">
+          <div className="flex flex-col gap-8 sm:flex-row sm:justify-between sm:items-center">
+            {/* Left side: Branding & Tagline */}
+            <div className="flex flex-col gap-3">
+              <BrandMark className="w-[130px] h-auto" />
+              <p className="text-sm text-slate-400 max-w-xs">
+                Create private push-to-talk voice rooms in seconds. No account required.
+              </p>
             </div>
 
-            <div className="flex flex-col items-start gap-4 sm:items-end">
-              <nav aria-label="Footer navigation" className="flex max-w-xl flex-wrap gap-x-5 gap-y-3 text-sm justify-start sm:justify-end">
-                <Link to={SEO_PAGES.onlineWalkieTalkie.path} className="text-slate-400 hover:text-mint">
-                  Online walkie-talkie
-                </Link>
-                <Link to={SEO_PAGES.voiceChatWithoutAccount.path} className="text-slate-400 hover:text-mint">
-                  Voice chat, no account
-                </Link>
-                <Link to={SEO_PAGES.groupVoiceChat.path} className="text-slate-400 hover:text-mint">
-                  Group voice chat
-                </Link>
-                <Link to={SEO_PAGES.browserVoiceChat.path} className=" text-slate-400 hover:text-mint">
-                  Browser voice chat
-                </Link>
-              </nav>
-              <img src="/mascot-updated.png" alt="Talkietiv Mascot" className="h-[300px] w-[300px] object-contain opacity-60 hover:opacity-100 transition-opacity" />
+            {/* Right side: Navigation Links */}
+            <nav aria-label="Footer navigation" className="grid grid-cols-2 gap-x-6 gap-y-2 text-sm sm:flex sm:flex-wrap sm:gap-x-6 sm:items-start">
+              <Link to={SEO_PAGES.onlineWalkieTalkie.path} className="text-slate-400 hover:text-mint transition-colors">
+                Online walkie-talkie
+              </Link>
+              <Link to={SEO_PAGES.voiceChatWithoutAccount.path} className="text-slate-400 hover:text-mint transition-colors">
+                Voice chat, no account
+              </Link>
+              <Link to={SEO_PAGES.groupVoiceChat.path} className="text-slate-400 hover:text-mint transition-colors">
+                Group voice chat
+              </Link>
+              <Link to={SEO_PAGES.browserVoiceChat.path} className="text-slate-400 hover:text-mint transition-colors">
+                Browser voice chat
+              </Link>
+            </nav>
+          </div>
+
+          {/* Divider */}
+          <div className="border-t border-line/30 my-6"></div>
+
+          {/* Bottom Bar */}
+          <div className="flex flex-col-reverse gap-4 sm:flex-row sm:justify-between sm:items-center text-xs text-slate-500">
+            <p>&copy; {new Date().getFullYear()} Talkietiv. All rights reserved.</p>
+            <div className="flex items-center gap-4">
+              <a 
+                href="https://www.instagram.com/talkietiv/" 
+                target="_blank" 
+                rel="noopener noreferrer" 
+                className="hover:text-mint transition-colors flex items-center gap-1.5"
+                aria-label="Instagram"
+              >
+                <Instagram className="h-4 w-4" />
+                <span>Instagram</span>
+              </a>
             </div>
           </div>
         </footer>
