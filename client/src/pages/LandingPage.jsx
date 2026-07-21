@@ -185,20 +185,23 @@ export default function LandingPage() {
               <p className="mt-3 text-sm text-white">&copy; Talkietiv 2026</p>
             </div>
 
-            <nav aria-label="Footer navigation" className="flex max-w-xl flex-wrap gap-x-5 gap-y-3 text-sm">
-              <Link to={SEO_PAGES.onlineWalkieTalkie.path} className="text-slate-400 hover:text-mint">
-                Online walkie-talkie
-              </Link>
-              <Link to={SEO_PAGES.voiceChatWithoutAccount.path} className="text-slate-400 hover:text-mint">
-                Voice chat, no account
-              </Link>
-              <Link to={SEO_PAGES.groupVoiceChat.path} className="text-slate-400 hover:text-mint">
-                Group voice chat
-              </Link>
-              <Link to={SEO_PAGES.browserVoiceChat.path} className="font-semibold text-slate-100 hover:text-mint">
-                Browser voice chat
-              </Link>
-            </nav>
+            <div className="flex flex-col items-start gap-4 sm:items-end">
+              <nav aria-label="Footer navigation" className="flex max-w-xl flex-wrap gap-x-5 gap-y-3 text-sm justify-start sm:justify-end">
+                <Link to={SEO_PAGES.onlineWalkieTalkie.path} className="text-slate-400 hover:text-mint">
+                  Online walkie-talkie
+                </Link>
+                <Link to={SEO_PAGES.voiceChatWithoutAccount.path} className="text-slate-400 hover:text-mint">
+                  Voice chat, no account
+                </Link>
+                <Link to={SEO_PAGES.groupVoiceChat.path} className="text-slate-400 hover:text-mint">
+                  Group voice chat
+                </Link>
+                <Link to={SEO_PAGES.browserVoiceChat.path} className=" text-slate-400 hover:text-mint">
+                  Browser voice chat
+                </Link>
+              </nav>
+              <img src="/mascot-updated.png" alt="Talkietiv Mascot" className="h-[300px] w-[300px] object-contain opacity-60 hover:opacity-100 transition-opacity" />
+            </div>
           </div>
         </footer>
       </div>
