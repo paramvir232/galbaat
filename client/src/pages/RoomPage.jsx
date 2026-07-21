@@ -315,7 +315,7 @@ export default function RoomPage() {
         const notification = new window.Notification(`Talkietiv message from ${message.username}`, {
           body,
           tag: `galbaat-${roomId}`,
-          icon: "/icon.svg"
+          icon: "/talkitiv-logo.png"
         });
         notification.onclick = () => {
           window.focus();
