@@ -56,19 +56,6 @@
       ]
     }
   ],
-  "redirects": [
-    {
-      "source": "/:path((?!sw\\.js$).*)",
-      "has": [
-        {
-          "type": "host",
-          "value": "www.talkietiv.com"
-        }
-      ],
-      "destination": "https://talkietiv.com/:path",
-      "permanent": true
-    }
-  ],
   "rewrites": [
     {
       "source": "/(.*)",
