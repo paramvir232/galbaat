@@ -964,7 +964,7 @@ export default function RoomPage() {
           <Link to="/" className="apple-control grid h-11 w-11 shrink-0 place-items-center rounded-md text-slate-300 sm:h-10 sm:w-10">
             <ArrowLeft className="h-4 w-4" />
           </Link>
-          <BrandMark className="h-9 w-9 sm:h-10 sm:w-10" />
+          <BrandMark className="w-[80px] sm:w-[120px] h-auto" />
           <div className="min-w-0">
             <div className="flex items-center gap-2">
               <Hash className="h-4 w-4 text-slate-500" />

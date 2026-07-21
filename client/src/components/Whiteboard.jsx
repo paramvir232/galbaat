@@ -1054,9 +1054,9 @@ export default function Whiteboard({ open, roomId, socket, currentUser, particip
     <div className="fixed inset-0 z-50 flex flex-col bg-black text-slate-100">
       <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-line bg-black/90 px-3 py-2.5 backdrop-blur-xl">
         <div className="flex min-w-0 items-center gap-2.5">
-          <BrandMark className="h-8 w-8" />
+          <BrandMark className="w-[70px] sm:w-[100px] h-auto" />
           <div>
-          <h2 className="text-sm font-bold tracking-tight">Talkietiv Whiteboard</h2>
+          <h2 className="text-sm font-bold tracking-tight">Whiteboard</h2>
           <p className="text-xs text-slate-400">Board {roomId} - Autosaves as you draw</p>
           </div>
         </div>

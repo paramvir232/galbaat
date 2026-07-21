@@ -11,11 +11,7 @@ export default function SeoPage({ page }) {
       <div className="mx-auto max-w-5xl">
         <nav className="apple-surface flex items-center justify-between gap-4 rounded-xl px-4 py-3 sm:px-5">
           <Link to="/" className="flex items-center gap-3" aria-label={`${SITE_NAME} home`}>
-            <BrandMark className="h-10 w-10" />
-            <span>
-              <span className="block text-lg font-black">{SITE_NAME}</span>
-              <span className="block text-xs text-slate-400">Live rooms, instant voice</span>
-            </span>
+            <BrandMark className="w-[100px] sm:w-[150px] h-auto" />
           </Link>
           <Link to="/" className="inline-flex shrink-0 items-center gap-2 rounded-md bg-mint px-3 py-2 text-sm font-bold text-black shadow-glow hover:bg-[#ff9d2f] sm:px-4">
             Create room

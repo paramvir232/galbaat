@@ -44,11 +44,7 @@ export default function LandingPage() {
       <div className="mx-auto flex min-h-[calc(100vh-2rem)] max-w-6xl flex-col sm:min-h-[calc(100vh-3rem)]">
         <nav className="apple-surface flex flex-wrap items-center justify-between gap-3 rounded-xl px-4 py-3 sm:px-5">
           <div className="flex items-center gap-3">
-            <BrandMark className="h-10 w-10 sm:h-11 sm:w-11" />
-            <div>
-              <p className="text-lg font-black tracking-normal sm:text-xl">Talkietiv</p>
-              <p className="text-xs text-slate-400">Live rooms, instant voice</p>
-            </div>
+            <BrandMark className="w-[100px] sm:w-[150px] h-auto" />
           </div>
           <span className="apple-control hidden rounded-full px-4 py-2 text-sm text-slate-300 sm:inline-flex">
             No accounts. No waiting.
