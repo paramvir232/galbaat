@@ -30,6 +30,10 @@
         {
           "key": "Strict-Transport-Security",
           "value": "max-age=31536000; includeSubDomains"
+        },
+        {
+          "key": "Access-Control-Allow-Origin",
+          "value": "*"
         }
       ]
     },
@@ -54,14 +58,14 @@
   ],
   "redirects": [
     {
-      "source": "/:path*",
+      "source": "/:path((?!sw\\.js$).*)",
       "has": [
         {
           "type": "host",
           "value": "www.talkietiv.com"
         }
       ],
-      "destination": "https://talkietiv.com/:path*",
+      "destination": "https://talkietiv.com/:path",
       "permanent": true
     }
   ],
