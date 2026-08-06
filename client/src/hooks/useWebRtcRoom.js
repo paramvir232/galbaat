@@ -52,6 +52,8 @@ export function useWebRtcRoom(socket, roomId) {
   const voiceDestinationRef = useRef(null);
   const voiceNodesRef = useRef([]);
   const [voiceEffect, setVoiceEffectState] = useState("none");
+  const [roomRecording, setRoomRecording] = useState({ active: false, startedAt: null });
+  const recordingSessionRef = useRef(null);
 
   const setTrackEnabled = useCallback((enabled) => {
     setAudioEnabled(enabled);
@@ -200,6 +202,67 @@ export function useWebRtcRoom(socket, roomId) {
     );
     setVoiceEffectState(effect);
   }, [ensureMedia]);
+
+  const addRecordingTrack = useCallback((track) => {
+    const session = recordingSessionRef.current;
+    if (!session || track?.kind !== "audio" || session.sources.has(track.id)) return;
+    try {
+      const source = session.context.createMediaStreamSource(new MediaStream([track]));
+      const gain = session.context.createGain();
+      gain.gain.value = 0.9;
+      source.connect(gain).connect(session.destination);
+      session.sources.set(track.id, { source, gain });
+    } catch {
+      // Some browser-provided tracks cannot be mixed; the remaining room audio still records.
+    }
+  }, []);
+
+  const startRoomRecording = useCallback(async () => {
+    if (recordingSessionRef.current) return recordingSessionRef.current.startedAt;
+    await ensureMedia();
+    const AudioContext = window.AudioContext || window.webkitAudioContext;
+    if (!AudioContext || !window.MediaRecorder) throw new Error("Room recording is not supported in this browser");
+
+    const context = new AudioContext({ latencyHint: "interactive" });
+    const destination = context.createMediaStreamDestination();
+    const mimeType = ["audio/webm;codecs=opus", "audio/ogg;codecs=opus", "audio/webm"].find((type) => window.MediaRecorder.isTypeSupported(type));
+    const recorder = new window.MediaRecorder(destination.stream, mimeType ? { mimeType, audioBitsPerSecond: 128000 } : { audioBitsPerSecond: 128000 });
+    const session = { context, destination, recorder, sources: new Map(), chunks: [], startedAt: Date.now(), mimeType: mimeType || "audio/webm" };
+    recordingSessionRef.current = session;
+    addRecordingTrack(outgoingAudioTrackRef.current || microphoneTrackRef.current);
+    peerStreamsRef.current.forEach((stream) => stream.getAudioTracks().forEach(addRecordingTrack));
+    recorder.ondataavailable = (event) => {
+      if (event.data.size) session.chunks.push(event.data);
+    };
+    recorder.start(1000);
+    await context.resume().catch(() => {});
+    setRoomRecording({ active: true, startedAt: session.startedAt });
+    return session.startedAt;
+  }, [addRecordingTrack, ensureMedia]);
+
+  const stopRoomRecording = useCallback(() => new Promise((resolve) => {
+    const session = recordingSessionRef.current;
+    if (!session) {
+      resolve(null);
+      return;
+    }
+    const finish = () => {
+      const endedAt = Date.now();
+      const blob = new window.Blob(session.chunks, { type: session.mimeType });
+      session.sources.forEach(({ source, gain }) => {
+        source.disconnect();
+        gain.disconnect();
+      });
+      session.destination.stream.getTracks().forEach((track) => track.stop());
+      session.context.close().catch(() => {});
+      recordingSessionRef.current = null;
+      setRoomRecording({ active: false, startedAt: null });
+      resolve({ blob, startedAt: session.startedAt, endedAt, mimeType: session.mimeType });
+    };
+    session.recorder.addEventListener("stop", finish, { once: true });
+    if (session.recorder.state !== "inactive") session.recorder.stop();
+    else finish();
+  }), []);
 
   const refreshLocalStreamState = useCallback(() => {
     if (!localStreamRef.current) {
@@ -615,6 +678,7 @@ export function useWebRtcRoom(socket, roomId) {
         if (!displayStream.getTracks().some((track) => track.id === event.track.id)) {
           displayStream.addTrack(event.track);
         }
+        if (event.track.kind === "audio") addRecordingTrack(event.track);
         peerStreamsRef.current.set(peerId, displayStream);
         displayStream.onremovetrack = refreshRemoteStreamsState;
         event.track.onended = refreshRemoteStreamsState;
@@ -674,7 +738,7 @@ export function useWebRtcRoom(socket, roomId) {
 
       return pc;
     },
-    [ensureMedia, playRemoteAudios, refreshRemoteStreamsState, renegotiatePeer, socket]
+    [addRecordingTrack, ensureMedia, playRemoteAudios, refreshRemoteStreamsState, renegotiatePeer, socket]
   );
 
   const createPeer = useCallback(
@@ -899,6 +963,7 @@ export function useWebRtcRoom(socket, roomId) {
       recoveryTimers.forEach((timer) => window.clearTimeout(timer));
       recoveryTimers.clear();
       localStreamRef.current?.getTracks().forEach((track) => track.stop());
+      if (recordingSessionRef.current?.recorder.state !== "inactive") recordingSessionRef.current.recorder.stop();
       localStreamRef.current = null;
       peerStreams.clear();
       audios.forEach((peerAudios) => {
@@ -937,8 +1002,11 @@ export function useWebRtcRoom(socket, roomId) {
     stopTabAudioShare,
     setPeerVolume,
     setVoiceEffect,
+    startRoomRecording,
+    stopRoomRecording,
     audioEnabled,
     voiceEffect,
+    roomRecording,
     videoEnabled,
     screenSharing,
     tabAudioSharing,

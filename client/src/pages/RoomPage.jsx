@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { motion } from "framer-motion";
-import { ArrowLeft, FileText, Hand, Hash, Loader2, Lock, Menu, Music, PanelLeftOpen, Paperclip, Pencil, ScreenShare, ScreenShareOff, Send, Settings, Unlock, Video, VideoOff, Wifi, WifiOff, X } from "lucide-react";
+import { ArrowLeft, Circle, Download, FileText, Hand, Hash, Loader2, Lock, Menu, Music, PanelLeftOpen, Paperclip, Pencil, ScreenShare, ScreenShareOff, Send, Settings, Square, Trash2, Unlock, Video, VideoOff, Wifi, WifiOff, X } from "lucide-react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import ChatPanel from "../components/ChatPanel.jsx";
 import BrandMark from "../components/BrandMark.jsx";
@@ -47,8 +47,11 @@ export default function RoomPage() {
     tabAudioSharing,
     setPeerVolume,
     setVoiceEffect,
+    startRoomRecording,
+    stopRoomRecording,
     audioEnabled,
     voiceEffect,
+    roomRecording,
     videoEnabled,
     screenSharing,
     localStream,
@@ -91,6 +94,9 @@ export default function RoomPage() {
   const [lockedJoinPending, setLockedJoinPending] = useState(false);
   const [joinRetryKey, setJoinRetryKey] = useState(0);
   const [roomFeatures, setRoomFeatures] = useState({ soundboardEnabled: true, voiceChangerEnabled: true });
+  const [recordingNotice, setRecordingNotice] = useState({ active: false, username: "", startedAt: null });
+  const [recordingPreview, setRecordingPreview] = useState(null);
+  const [recordingElapsed, setRecordingElapsed] = useState(0);
   const speakingRef = useRef(false);
   const micLockedRef = useRef(false);
   const boardMuteRestoreLockRef = useRef(false);
@@ -419,6 +425,7 @@ export default function RoomPage() {
       setSelf(ack.user);
       setRoom(ack.room);
       setRoomFeatures(ack.features || { soundboardEnabled: true, voiceChangerEnabled: true });
+      setRecordingNotice(ack.recording || { active: false, username: "", startedAt: null });
       setStatus("connected");
       try {
         const peers = ack.peers || [];
@@ -547,6 +554,9 @@ export default function RoomPage() {
       setRoomFeatures(nextFeatures);
       if (!nextFeatures.voiceChangerEnabled) setVoiceEffect("none").catch(() => {});
     }
+    function onRecordingState(nextRecording) {
+      setRecordingNotice(nextRecording || { active: false, username: "", startedAt: null });
+    }
     function onMutedByHost({ muted: nextMuted = true } = {}) {
       setMuted(Boolean(nextMuted));
       if (nextMuted) stopTalking(true);
@@ -590,6 +600,7 @@ export default function RoomPage() {
     socket.on("typing:stop", onTypingStop);
     socket.on("room:lock", onLock);
     socket.on("room:features", onRoomFeatures);
+    socket.on("room:recording", onRecordingState);
     socket.on("host:muted", onMutedByHost);
     socket.on("host:kicked", onKicked);
     socket.on("room:ended", onRoomEnded);
@@ -611,6 +622,7 @@ export default function RoomPage() {
       socket.off("typing:stop", onTypingStop);
       socket.off("room:lock", onLock);
       socket.off("room:features", onRoomFeatures);
+      socket.off("room:recording", onRecordingState);
       socket.off("host:muted", onMutedByHost);
       socket.off("host:kicked", onKicked);
       socket.off("room:ended", onRoomEnded);
@@ -622,6 +634,18 @@ export default function RoomPage() {
   useEffect(() => {
     if (mobilePanel === "chat") setUnreadCount(0);
   }, [mobilePanel]);
+
+  useEffect(() => {
+    const startedAt = roomRecording.active ? roomRecording.startedAt : recordingNotice.active ? recordingNotice.startedAt : null;
+    if (!startedAt) {
+      setRecordingElapsed(0);
+      return undefined;
+    }
+    const update = () => setRecordingElapsed(Date.now() - new Date(startedAt).getTime());
+    update();
+    const timer = window.setInterval(update, 1000);
+    return () => window.clearInterval(timer);
+  }, [recordingNotice.active, recordingNotice.startedAt, roomRecording.active, roomRecording.startedAt]);
 
   useEffect(() => {
     if (!connected || !joinedRef.current) return undefined;
@@ -863,6 +887,29 @@ export default function RoomPage() {
     window.URL.revokeObjectURL(url);
   }
 
+  function formatRecordingTime(milliseconds) {
+    const seconds = Math.max(0, Math.floor(milliseconds / 1000));
+    const minutes = Math.floor(seconds / 60);
+    return `${String(minutes).padStart(2, "0")}:${String(seconds % 60).padStart(2, "0")}`;
+  }
+
+  async function toggleRoomRecording() {
+    try {
+      if (roomRecording.active) {
+        const result = await stopRoomRecording();
+        socket.emit("room:recording", { roomId, recording: false });
+        if (!result?.blob?.size) return;
+        const url = window.URL.createObjectURL(result.blob);
+        setRecordingPreview({ ...result, url });
+        return;
+      }
+      const startedAt = await startRoomRecording();
+      socket.emit("room:recording", { roomId, recording: true, startedAt });
+    } catch (recordingError) {
+      setError(recordingError.message || "Unable to start room recording.");
+    }
+  }
+
   async function uploadFile(file, options = {}) {
     const clientUploadId = options.clientUploadId || (options.optimistic ? `upload-${Date.now()}-${Math.random().toString(36).slice(2)}` : undefined);
     let optimisticUrl = null;
@@ -1048,7 +1095,23 @@ export default function RoomPage() {
           <StatusPill tone={statusTone}>
             {status === "connected" ? "Connected" : status === "voice-limited" ? "Chat connected" : status === "waiting" ? "Waiting" : "Reconnecting"}
           </StatusPill>
+          {recordingNotice.active && (
+            <div className="inline-flex min-h-9 items-center gap-2 rounded-full border border-red-400/40 bg-red-500/10 px-3 text-xs font-bold text-red-100">
+              <span className="h-2 w-2 animate-pulse rounded-full bg-red-400" />
+              Recording {formatRecordingTime(recordingElapsed)}
+            </div>
+          )}
           <ShareRoom roomId={roomId} />
+          {isHost && (
+            <button
+              type="button"
+              onClick={toggleRoomRecording}
+              title={roomRecording.active ? "Stop recording" : "Record room audio"}
+              className={`grid h-11 w-11 place-items-center rounded-[14px] border transition sm:h-10 sm:w-10 ${roomRecording.active ? "border-red-400/50 bg-red-500/15 text-red-200" : "apple-control text-slate-200"}`}
+            >
+              {roomRecording.active ? <Square className="h-3.5 w-3.5 fill-current" /> : <Circle className="h-4 w-4 text-red-300" />}
+            </button>
+          )}
           <button
             type="button"
             onClick={downloadTranscript}
@@ -1450,6 +1513,38 @@ export default function RoomPage() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {recordingPreview && (
+        <div className="fixed inset-0 z-[100] grid place-items-center bg-black/75 p-4 backdrop-blur-md">
+          <div className="apple-surface w-full max-w-lg rounded-xl p-5 shadow-2xl">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <h2 className="text-base font-bold text-slate-100">Room recording</h2>
+                <p className="mt-1 text-xs text-slate-400">{formatRecordingTime(recordingPreview.endedAt - recordingPreview.startedAt)} · {new Date(recordingPreview.startedAt).toLocaleString()}</p>
+              </div>
+              <button type="button" onClick={() => setRecordingPreview(null)} className="grid h-9 w-9 place-items-center rounded-md border border-line text-slate-300 hover:bg-white/10" title="Close preview">
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <audio controls preload="metadata" src={recordingPreview.url} className="mt-5 w-full" />
+            <div className="mt-5 flex justify-end gap-2">
+              <a href={recordingPreview.url} download={`talkietiv-room-${roomId}-${recordingPreview.startedAt}.webm`} className="inline-flex min-h-10 items-center gap-2 rounded-md bg-mint px-4 text-sm font-bold text-ink hover:bg-mint/90">
+                <Download className="h-4 w-4" /> Download
+              </a>
+              <button
+                type="button"
+                onClick={() => {
+                  window.URL.revokeObjectURL(recordingPreview.url);
+                  setRecordingPreview(null);
+                }}
+                className="inline-flex min-h-10 items-center gap-2 rounded-md border border-red-400/35 bg-red-500/10 px-4 text-sm font-semibold text-red-100 hover:bg-red-500/20"
+              >
+                <Trash2 className="h-4 w-4" /> Delete
+              </button>
+            </div>
           </div>
         </div>
       )}

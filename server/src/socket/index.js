@@ -19,6 +19,7 @@ const soundboardCooldowns = new Map();
 const soundboardSounds = new Set(["laugh", "clap", "airhorn", "whistle", "drumroll", "boo", "applause", "rimshot", "tada"]);
 const SOUNDBOARD_COOLDOWN_MS = 1200;
 const roomFeatures = new Map();
+const roomRecordings = new Map();
 
 function roomUsers(roomId) {
   if (!rooms.has(roomId)) rooms.set(roomId, new Map());
@@ -92,6 +93,10 @@ function getRoomFeatures(roomId) {
     roomFeatures.set(roomId, { soundboardEnabled: true, voiceChangerEnabled: true });
   }
   return roomFeatures.get(roomId);
+}
+
+function getRoomRecording(roomId) {
+  return roomRecordings.get(roomId) || { active: false, username: "", startedAt: null };
 }
 
 function roomBoardEditRequests(roomId) {
@@ -280,6 +285,7 @@ async function scheduleEmptyRoomCleanup(roomId) {
       boardEditPermissions.delete(roomId);
       boardEditRequests.delete(roomId);
       roomFeatures.delete(roomId);
+      roomRecordings.delete(roomId);
       await deleteRoom(roomId);
     } catch (error) {
       console.error(`Empty room cleanup failed for ${roomId}`, error);
@@ -307,6 +313,10 @@ async function leaveCurrentRoom(io, socket) {
     socket.leave(currentRoomId);
     return;
   }
+  if (user.host && getRoomRecording(currentRoomId).active) {
+    roomRecordings.delete(currentRoomId);
+    io.to(currentRoomId).emit("room:recording", getRoomRecording(currentRoomId));
+  }
   users.delete(socket.id);
   soundboardCooldowns.delete(socket.id);
   const nextHost = ensureRoomHost(currentRoomId);
@@ -328,6 +338,7 @@ async function leaveCurrentRoom(io, socket) {
     boardEditPermissions.delete(currentRoomId);
     boardEditRequests.delete(currentRoomId);
     roomFeatures.delete(currentRoomId);
+    roomRecordings.delete(currentRoomId);
     await scheduleEmptyRoomCleanup(currentRoomId);
     return;
   }
@@ -401,7 +412,7 @@ export function registerSocketHandlers(io) {
           const existingPeers = [...users.values()]
             .filter((participant) => participant.id !== socket.id)
             .map(publicUser);
-          ack?.({ ok: true, user: publicUser(existingUser), room, peers: existingPeers, features: getRoomFeatures(normalizedRoomId), alreadyJoined: true });
+          ack?.({ ok: true, user: publicUser(existingUser), room, peers: existingPeers, features: getRoomFeatures(normalizedRoomId), recording: getRoomRecording(normalizedRoomId), alreadyJoined: true });
           emitParticipants(io, normalizedRoomId);
           return;
         }
@@ -454,7 +465,7 @@ export function registerSocketHandlers(io) {
           .filter((participant) => participant.id !== socket.id)
           .map(publicUser);
 
-        ack?.({ ok: true, user: publicUser(user), room, peers: existingPeers, features: getRoomFeatures(normalizedRoomId) });
+        ack?.({ ok: true, user: publicUser(user), room, peers: existingPeers, features: getRoomFeatures(normalizedRoomId), recording: getRoomRecording(normalizedRoomId) });
         // Existing members own the first offer, preventing first-join offer collisions.
         socket.to(normalizedRoomId).emit("webrtc:peer-ready", { id: socket.id });
         if (!replacedUser) socket.to(normalizedRoomId).emit("participant:joined", publicUser(user));
@@ -632,6 +643,22 @@ export function registerSocketHandlers(io) {
       features[featureKey] = Boolean(enabled);
       io.to(normalizedRoomId).emit("room:features", features);
       ack?.({ ok: true, features });
+    });
+
+    socket.on("room:recording", ({ roomId, recording, startedAt }, ack) => {
+      const normalizedRoomId = String(roomId || socket.data.roomId || "").toUpperCase();
+      const user = rooms.get(normalizedRoomId)?.get(socket.id);
+      if (!user?.host) {
+        ack?.({ ok: false, error: "Only the room admin can record this room" });
+        return;
+      }
+      const nextRecording = Boolean(recording)
+        ? { active: true, username: user.username, startedAt: Number(startedAt) || Date.now() }
+        : { active: false, username: "", startedAt: null };
+      if (nextRecording.active) roomRecordings.set(normalizedRoomId, nextRecording);
+      else roomRecordings.delete(normalizedRoomId);
+      io.to(normalizedRoomId).emit("room:recording", nextRecording);
+      ack?.({ ok: true, recording: nextRecording });
     });
 
     socket.on("soundboard:play", ({ roomId, soundId }, ack) => {
