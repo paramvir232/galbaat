@@ -30,10 +30,10 @@ export const env = {
   maxRoomParticipants: Math.max(2, Math.min(15, Number(process.env.MAX_ROOM_PARTICIPANTS || 15))),
   emptyRoomGraceMs: Number(process.env.EMPTY_ROOM_GRACE_MS || 60 * 60 * 1000),
   supportEmailTo: process.env.SUPPORT_EMAIL_TO || "talkitiv01@gmail.com",
-  supportEmailFrom: process.env.SUPPORT_EMAIL_FROM || "",
+  supportEmailFrom: process.env.SUPPORT_EMAIL_FROM || "talkitiv01@gmail.com",
   supportSmtpHost: process.env.SUPPORT_SMTP_HOST || "smtp.gmail.com",
   supportSmtpPort: Number(process.env.SUPPORT_SMTP_PORT || 465),
   supportSmtpSecure: process.env.SUPPORT_SMTP_SECURE !== "false",
-  supportSmtpUser: process.env.SUPPORT_SMTP_USER || "",
-  supportSmtpPassword: process.env.SUPPORT_SMTP_PASSWORD || ""
+  supportSmtpUser: process.env.SUPPORT_SMTP_USER || "talkitiv01@gmail.com",
+  supportSmtpPassword: String(process.env.SUPPORT_SMTP_PASSWORD || "").replace(/\s/g, "")
 };

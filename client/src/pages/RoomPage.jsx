@@ -566,8 +566,7 @@ export default function RoomPage() {
       navigate("/");
     }
     function onRoomEnded() {
-      setError("This room has ended.");
-      navigate("/");
+      window.location.replace("/");
     }
     function onJoinRequests(requests = []) {
       const prevRequests = joinRequestsRef.current;
@@ -740,8 +739,13 @@ export default function RoomPage() {
   }
 
   function endRoom() {
-    socket.emit("room:end", { roomId });
-    navigate("/");
+    socket.emit("room:end", { roomId }, (ack) => {
+      if (!ack?.ok) {
+        setError(ack?.error || "Unable to end the room.");
+        return;
+      }
+      window.location.replace("/");
+    });
   }
 
   function hostMute(targetId, muted) {

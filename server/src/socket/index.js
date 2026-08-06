@@ -997,15 +997,23 @@ export function registerSocketHandlers(io) {
       emitJoinRequests(io, normalizedRoomId);
     });
 
-    socket.on("room:end", async ({ roomId }) => {
+    socket.on("room:end", async ({ roomId }, ack) => {
       const normalizedRoomId = String(roomId || socket.data.roomId || "").toUpperCase();
       const user = rooms.get(normalizedRoomId)?.get(socket.id);
-      if (!user?.host) return;
-      io.to(normalizedRoomId).emit("room:ended");
-      await deleteRoom(normalizedRoomId);
-      rooms.delete(normalizedRoomId);
-      joinRequests.delete(normalizedRoomId);
-      approvedJoinSockets.delete(normalizedRoomId);
+      if (!user?.host) {
+        ack?.({ ok: false, error: "Only the room admin can end this room" });
+        return;
+      }
+      try {
+        io.to(normalizedRoomId).emit("room:ended");
+        await deleteRoom(normalizedRoomId);
+        rooms.delete(normalizedRoomId);
+        joinRequests.delete(normalizedRoomId);
+        approvedJoinSockets.delete(normalizedRoomId);
+        ack?.({ ok: true });
+      } catch {
+        ack?.({ ok: false, error: "Unable to end the room" });
+      }
     });
 
     socket.on("host:mute", ({ roomId, targetId, muted }) => {

@@ -38,11 +38,14 @@ function supportMailer() {
     auth: {
       user: env.supportSmtpUser,
       pass: env.supportSmtpPassword
-    }
+    },
+    connectionTimeout: 12_000,
+    greetingTimeout: 12_000,
+    socketTimeout: 25_000
   });
 }
 
-supportRouter.post("/", supportRateLimit, screenshotUpload.single("screenshot"), async (req, res, next) => {
+supportRouter.post("/", supportRateLimit, screenshotUpload.single("screenshot"), async (req, res) => {
   try {
     const category = req.body?.category === "query" ? "query" : "bug";
     const message = cleanText(req.body?.message, 4_000);
@@ -56,7 +59,7 @@ supportRouter.post("/", supportRateLimit, screenshotUpload.single("screenshot"),
     }
 
     await supportMailer().sendMail({
-      from: env.supportEmailFrom || env.supportSmtpUser,
+      from: `Talkietiv Support <${env.supportSmtpUser}>`,
       to: env.supportEmailTo,
       subject: `[Talkietiv] Anonymous ${category === "bug" ? "bug report" : "query"}`,
       text: `Anonymous ${category === "bug" ? "bug report" : "query"}\n\n${message}\n\nSent: ${new Date().toISOString()}`,
@@ -68,6 +71,13 @@ supportRouter.post("/", supportRateLimit, screenshotUpload.single("screenshot"),
     res.setHeader("Cache-Control", "no-store");
     return res.status(202).json({ ok: true });
   } catch (error) {
-    return next(error);
+    console.error("Support email delivery failed", { code: error.code, responseCode: error.responseCode });
+    if (error.code === "EAUTH" || error.responseCode === 535) {
+      return res.status(502).json({ message: "Support email authentication failed. Please contact the site owner." });
+    }
+    if (["ECONNECTION", "ETIMEDOUT", "ESOCKET"].includes(error.code)) {
+      return res.status(503).json({ message: "Support email service is temporarily unavailable. Please try again shortly." });
+    }
+    return res.status(502).json({ message: "Unable to send your message right now. Please try again shortly." });
   }
 });

@@ -1008,11 +1008,16 @@ export default function Whiteboard({ open, roomId, socket, currentUser, particip
       const { bounds, svg } = exportSvgMarkup();
       const image = new window.Image();
       image.decoding = "async";
-      await new Promise((resolve, reject) => {
-        image.onload = resolve;
-        image.onerror = reject;
-        image.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
-      });
+      const svgUrl = window.URL.createObjectURL(new window.Blob([svg], { type: "image/svg+xml;charset=utf-8" }));
+      try {
+        await new Promise((resolve, reject) => {
+          image.onload = resolve;
+          image.onerror = reject;
+          image.src = svgUrl;
+        });
+      } finally {
+        window.URL.revokeObjectURL(svgUrl);
+      }
       const canvas = document.createElement("canvas");
       canvas.width = Math.round(bounds.width);
       canvas.height = Math.round(bounds.height);
