@@ -116,7 +116,7 @@ function roomBoardState(roomId) {
   if (!boardStates.has(roomId)) {
     boardStates.set(roomId, {
       elements: new Map(),
-      background: "#0f172a",
+      background: "#000000",
       version: 0,
       loaded: false
     });
@@ -130,12 +130,12 @@ async function loadBoardState(roomId) {
 
   const board = await Board.findOneAndUpdate(
     { roomId },
-    { $setOnInsert: { roomId, elements: [], background: "#0f172a", version: 0 } },
+    { $setOnInsert: { roomId, elements: [], background: "#000000", version: 0 } },
     { new: true, upsert: true }
   ).lean();
 
   state.elements = new Map((board.elements || []).map((element) => [element.id, element]));
-  state.background = board.background || "#0f172a";
+  state.background = board.background || "#000000";
   state.version = board.version || 0;
   state.loaded = true;
   return state;
@@ -240,7 +240,7 @@ function cleanBoardElement(element) {
 
 function cleanBoardState(state = {}) {
   const elements = Array.isArray(state.elements) ? state.elements.map(cleanBoardElement).filter(Boolean).slice(-1200) : [];
-  const background = /^#[0-9a-f]{6}$/i.test(String(state.background || "")) ? state.background : "#0f172a";
+  const background = /^#[0-9a-f]{6}$/i.test(String(state.background || "")) ? state.background : "#000000";
   return { elements, background };
 }
 
@@ -800,6 +800,9 @@ export function registerSocketHandlers(io) {
       if (canEdit) editors.add(target.id);
       else editors.delete(target.id);
       io.to(target.id).emit("whiteboard:permission", { canEditBoard: canEditBoard(normalizedRoomId, target) });
+      if (!canEdit) {
+        io.to(target.id).emit("whiteboard:update", publicBoardState(normalizedRoomId, { updatedBy: socket.id }));
+      }
       if (canEdit && roomBoardEditRequests(normalizedRoomId).delete(target.id)) {
         io.to(target.id).emit("whiteboard:edit-request:resolved", { approved: true });
         emitBoardEditRequests(io, normalizedRoomId);

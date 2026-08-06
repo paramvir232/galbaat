@@ -48,7 +48,6 @@ const TOOLS = [
 ];
 
 const COLORS = ["#FFFFFF", "#FF8A00", "#F5F5F7", "#8E8E93", "#FF453A", "#AF52DE", "#64D2FF", "#111111"];
-const PEN_CURSOR = `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='18' height='18' viewBox='0 0 18 18'%3E%3Ccircle cx='9' cy='9' r='4' fill='%23FF8A00' stroke='%23000000' stroke-width='2'/%3E%3C/svg%3E") 9 9, crosshair`;
 
 function makeId() {
   return `wb-${Date.now()}-${Math.random().toString(36).slice(2)}`;
@@ -236,13 +235,24 @@ function readFileAsDataUrl(file) {
   });
 }
 
-function cursorForTool(tool, isDragging, canEdit) {
+function brushCursor(color, width, translucent = false) {
+  const safeColor = /^#[0-9a-f]{6}$/i.test(color) ? color : "#FF8A00";
+  const radius = Math.max(2, Math.min(20, Number(width) / 2 || 2));
+  const padding = 3;
+  const size = Math.ceil(radius * 2 + padding * 2);
+  const center = size / 2;
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 ${size} ${size}"><circle cx="${center}" cy="${center}" r="${radius}" fill="${safeColor}" fill-opacity="${translucent ? 0.45 : 1}" stroke="#ffffff" stroke-opacity="0.8" stroke-width="1"/></svg>`;
+  return `url("data:image/svg+xml,${encodeURIComponent(svg)}") ${center} ${center}, crosshair`;
+}
+
+function cursorForTool(tool, isDragging, canEdit, stroke, strokeWidth) {
   if (!canEdit) return isDragging ? "grabbing" : "grab";
   if (tool === "hand") return isDragging ? "grabbing" : "grab";
   if (tool === "select") return "default";
   if (tool === "text") return "text";
   if (tool === "eraser") return "cell";
-  if (tool === "pen" || tool === "highlighter") return PEN_CURSOR;
+  if (tool === "pen") return brushCursor(stroke, strokeWidth);
+  if (tool === "highlighter") return brushCursor(stroke, strokeWidth, true);
   return "crosshair";
 }
 
@@ -308,7 +318,7 @@ function elementToSvg(element) {
 export default function Whiteboard({ open, roomId, socket, currentUser, participants = [], peerVolumes = {}, onPeerVolumeChange, onSelfMute, chatPanel, onClose }) {
   const stageRef = useRef(null);
   const elementsRef = useRef([]);
-  const backgroundRef = useRef("#0f172a");
+  const backgroundRef = useRef("#000000");
   const dragRef = useRef(null);
   const clipboardRef = useRef([]);
   const lastCursorRef = useRef(0);
@@ -327,7 +337,7 @@ export default function Whiteboard({ open, roomId, socket, currentUser, particip
   const [fill, setFill] = useState("transparent");
   const [strokeWidth, setStrokeWidth] = useState(4);
   const [opacity, setOpacity] = useState(1);
-  const [background, setBackground] = useState("#0f172a");
+  const [background, setBackground] = useState("#000000");
   const [view, setView] = useState({ x: 0, y: 0, scale: 1 });
   const [error, setError] = useState("");
   const [panelCollapsed, setPanelCollapsed] = useState(false);
@@ -340,11 +350,13 @@ export default function Whiteboard({ open, roomId, socket, currentUser, particip
   const [isDragging, setIsDragging] = useState(false);
   const [marquee, setMarquee] = useState(null);
   const [textEditor, setTextEditor] = useState(null);
+  const canEditBoardRef = useRef(Boolean(currentUser?.host));
 
   const selectedElement = useMemo(() => elements.find((element) => element.id === selectedIds[0]), [elements, selectedIds]);
-  const boardCursor = useMemo(() => cursorForTool(tool, isDragging, canEditBoard), [canEditBoard, isDragging, tool]);
+  const boardCursor = useMemo(() => cursorForTool(tool, isDragging, canEditBoard, stroke, strokeWidth), [canEditBoard, isDragging, stroke, strokeWidth, tool]);
 
   useEffect(() => {
+    canEditBoardRef.current = canEditBoard;
     if (open && !canEditBoard && tool !== "hand") {
       setTool("hand");
       setSelectedIds([]);
@@ -388,6 +400,20 @@ export default function Whiteboard({ open, roomId, socket, currentUser, particip
     elementsRef.current = nextElements;
   }
 
+  const cancelActiveEdit = useCallback(() => {
+    const drag = dragRef.current;
+    window.clearTimeout(saveTimerRef.current);
+    if (drag && drag.mode !== "pan") {
+      const nextElements = drag.previous || (drag.id ? elementsRef.current.filter((element) => element.id !== drag.id) : elementsRef.current);
+      setElements(nextElements);
+      elementsRef.current = nextElements;
+    }
+    dragRef.current = null;
+    setIsDragging(false);
+    setMarquee(null);
+    setTextEditor(null);
+  }, []);
+
   function emitElement(element, action = "upsert", immediate = false) {
     if (!open || !canEditBoard || !element) return;
     const now = Date.now();
@@ -418,10 +444,12 @@ export default function Whiteboard({ open, roomId, socket, currentUser, particip
       const board = ack.board || {};
       setElements(board.elements || []);
       elementsRef.current = board.elements || [];
-      setBackground(board.background || "#0f172a");
-      backgroundRef.current = board.background || "#0f172a";
+      setBackground(board.background || "#000000");
+      backgroundRef.current = board.background || "#000000";
       setBoardUsers(board.users || []);
-      setCanEditBoard(Boolean(ack.canEditBoard || currentUser?.host));
+      const nextCanEdit = Boolean(ack.canEditBoard || currentUser?.host);
+      canEditBoardRef.current = nextCanEdit;
+      setCanEditBoard(nextCanEdit);
       setEditRequests(ack.editRequests || []);
       setEditRequestPending(false);
       setHistory([]);
@@ -447,8 +475,8 @@ export default function Whiteboard({ open, roomId, socket, currentUser, particip
         }
         applyElements([...merged.values()]);
       }
-      setBackground(board.background || "#0f172a");
-      backgroundRef.current = board.background || "#0f172a";
+      setBackground(board.background || "#000000");
+      backgroundRef.current = board.background || "#000000";
     }
   function onElementUpdate({ action, element }) {
       if (!element?.id) return;
@@ -487,11 +515,19 @@ export default function Whiteboard({ open, roomId, socket, currentUser, particip
     function onBoardUsers(users) {
       setBoardUsers(users || []);
       const me = users?.find((user) => user.id === currentUser?.id);
-      if (me) setCanEditBoard(Boolean(me.canEditBoard));
+      if (me) {
+        const nextCanEdit = Boolean(me.canEditBoard);
+        canEditBoardRef.current = nextCanEdit;
+        if (!nextCanEdit) cancelActiveEdit();
+        setCanEditBoard(nextCanEdit);
+      }
     }
     function onPermission({ canEditBoard: nextCanEdit }) {
-      setCanEditBoard(Boolean(nextCanEdit));
-      if (nextCanEdit) setEditRequestPending(false);
+      const allowed = Boolean(nextCanEdit);
+      canEditBoardRef.current = allowed;
+      if (!allowed) cancelActiveEdit();
+      setCanEditBoard(allowed);
+      if (allowed) setEditRequestPending(false);
     }
     function onEditRequests(requests) {
       setEditRequests(requests || []);
@@ -523,7 +559,7 @@ export default function Whiteboard({ open, roomId, socket, currentUser, particip
       socket.off("whiteboard:edit-requests", onEditRequests);
       socket.off("whiteboard:edit-request:resolved", onEditRequestResolved);
     };
-  }, [currentUser?.host, currentUser?.id, open, roomId, socket]);
+  }, [cancelActiveEdit, currentUser?.host, currentUser?.id, open, roomId, socket]);
 
   function screenToWorld(event) {
     const rect = stageRef.current.getBoundingClientRect();
@@ -566,7 +602,7 @@ export default function Whiteboard({ open, roomId, socket, currentUser, particip
     const point = screenToWorld(event);
     setIsDragging(true);
 
-    if (!canEditBoard || tool === "hand" || event.altKey) {
+    if (!canEditBoardRef.current || tool === "hand" || event.altKey) {
       dragRef.current = { mode: "pan", startX: event.clientX, startY: event.clientY, view };
       return;
     }
@@ -651,6 +687,11 @@ export default function Whiteboard({ open, roomId, socket, currentUser, particip
     const drag = dragRef.current;
     if (!drag) return;
 
+    if (!canEditBoardRef.current && drag.mode !== "pan") {
+      cancelActiveEdit();
+      return;
+    }
+
     if (drag.mode === "pan") {
       setView({ ...drag.view, x: drag.view.x + event.clientX - drag.startX, y: drag.view.y + event.clientY - drag.startY });
       return;
@@ -688,6 +729,10 @@ export default function Whiteboard({ open, roomId, socket, currentUser, particip
   function endPointer() {
     setIsDragging(false);
     const drag = dragRef.current;
+    if (drag && !canEditBoardRef.current && drag.mode !== "pan") {
+      cancelActiveEdit();
+      return;
+    }
     if (!drag || drag.mode === "pan") {
       setMarquee(null);
       dragRef.current = null;
@@ -829,7 +874,7 @@ export default function Whiteboard({ open, roomId, socket, currentUser, particip
 
   function submitTextEditor() {
     const text = textEditor?.value.trim().slice(0, 400);
-    if (!text || !textEditor) {
+    if (!text || !textEditor || !canEditBoardRef.current) {
       setTextEditor(null);
       return;
     }

@@ -39,7 +39,7 @@ const boardSchema = new mongoose.Schema(
     },
     background: {
       type: String,
-      default: "#0f172a"
+      default: "#000000"
     },
     version: {
       type: Number,
