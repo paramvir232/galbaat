@@ -29,6 +29,7 @@ export function useWebRtcRoom(socket, roomId) {
   const [remoteStreams, setRemoteStreams] = useState([]);
   const [autoplayBlocked, setAutoplayBlocked] = useState(false);
   const peersRef = useRef(new Map());
+  const microphoneSendersRef = useRef(new Map());
   const audioRef = useRef(new Map());
   const volumeRef = useRef(new Map());
   const peerStreamsRef = useRef(new Map());
@@ -44,12 +45,18 @@ export function useWebRtcRoom(socket, roomId) {
   const tabAudioSendersRef = useRef(new Map());
   const displayAudioStreamRef = useRef(null);
   const screenShareTrackRef = useRef(null);
+  const microphoneTrackRef = useRef(null);
+  const outgoingAudioTrackRef = useRef(null);
+  const voiceContextRef = useRef(null);
+  const voiceInputRef = useRef(null);
+  const voiceDestinationRef = useRef(null);
+  const voiceNodesRef = useRef([]);
+  const [voiceEffect, setVoiceEffectState] = useState("none");
 
   const setTrackEnabled = useCallback((enabled) => {
     setAudioEnabled(enabled);
-    localStreamRef.current?.getAudioTracks().forEach((track) => {
-      track.enabled = enabled;
-    });
+    const microphoneTrack = microphoneTrackRef.current || localStreamRef.current?.getAudioTracks()[0];
+    if (microphoneTrack) microphoneTrack.enabled = enabled;
   }, []);
 
   const ensureMedia = useCallback(async () => {
@@ -66,6 +73,8 @@ export function useWebRtcRoom(socket, roomId) {
       stream.getAudioTracks().forEach((track) => {
         track.enabled = false;
       });
+      microphoneTrackRef.current = stream.getAudioTracks()[0] || null;
+      outgoingAudioTrackRef.current = microphoneTrackRef.current;
       localStreamRef.current = stream;
       setLocalStream(stream);
       return stream;
@@ -74,6 +83,123 @@ export function useWebRtcRoom(socket, roomId) {
       throw error;
     }
   }, []);
+
+  const setVoiceEffect = useCallback(async (effect = "none") => {
+    if (effect === "none" && !localStreamRef.current) {
+      setVoiceEffectState("none");
+      return;
+    }
+    const stream = await ensureMedia();
+    const microphoneTrack = microphoneTrackRef.current || stream.getAudioTracks()[0];
+    if (!microphoneTrack) throw new Error("Microphone is unavailable");
+
+    const clearVoiceGraph = () => {
+      voiceNodesRef.current.forEach((node) => {
+        node.disconnect();
+        node.stop?.();
+      });
+      voiceNodesRef.current = [];
+      voiceInputRef.current?.disconnect();
+    };
+
+    let outgoingTrack = microphoneTrack;
+    if (effect !== "none") {
+      if (!voiceContextRef.current) {
+        const AudioContext = window.AudioContext || window.webkitAudioContext;
+        if (!AudioContext) throw new Error("Voice effects are not supported in this browser");
+        const context = new AudioContext({ latencyHint: "interactive" });
+        const input = context.createGain();
+        const destination = context.createMediaStreamDestination();
+        const source = context.createMediaStreamSource(new MediaStream([microphoneTrack]));
+        source.connect(input);
+        voiceContextRef.current = context;
+        voiceInputRef.current = input;
+        voiceDestinationRef.current = destination;
+      }
+
+      const context = voiceContextRef.current;
+      const input = voiceInputRef.current;
+      const destination = voiceDestinationRef.current;
+      clearVoiceGraph();
+
+      const register = (...nodes) => {
+        voiceNodesRef.current.push(...nodes);
+        return nodes;
+      };
+      const filter = (type, frequency, gain = 0, q = 0.8) => {
+        const node = context.createBiquadFilter();
+        node.type = type;
+        node.frequency.value = frequency;
+        node.gain.value = gain;
+        node.Q.value = q;
+        return node;
+      };
+      const connect = (...nodes) => {
+        input.connect(nodes[0]);
+        nodes.reduce((previous, node) => {
+          if (previous !== node) previous.connect(node);
+          return node;
+        });
+        nodes[nodes.length - 1].connect(destination);
+        register(...nodes);
+      };
+
+      if (effect === "metallic") {
+        const highPass = filter("highpass", 180);
+        const delay = context.createDelay(0.08);
+        const feedback = context.createGain();
+        delay.delayTime.value = 0.028;
+        feedback.gain.value = 0.34;
+        input.connect(highPass).connect(delay).connect(destination);
+        delay.connect(feedback).connect(delay);
+        register(highPass, delay, feedback);
+      } else if (effect === "robot" || effect === "alien") {
+        const gain = context.createGain();
+        const oscillator = context.createOscillator();
+        gain.gain.value = 0.56;
+        oscillator.type = "square";
+        oscillator.frequency.value = effect === "robot" ? 72 : 28;
+        oscillator.connect(gain.gain);
+        oscillator.start();
+        input.connect(gain).connect(destination);
+        register(gain, oscillator);
+      } else if (effect === "echo") {
+        const delay = context.createDelay(0.8);
+        const feedback = context.createGain();
+        const wet = context.createGain();
+        delay.delayTime.value = 0.22;
+        feedback.gain.value = 0.28;
+        wet.gain.value = 0.42;
+        input.connect(destination);
+        input.connect(delay).connect(wet).connect(destination);
+        delay.connect(feedback).connect(delay);
+        register(delay, feedback, wet);
+      } else if (effect === "radio") {
+        connect(filter("highpass", 450, 0, 1), filter("lowpass", 2800, 0, 1));
+      } else if (effect === "deep" || effect === "monster") {
+        const low = filter("lowshelf", 220, effect === "monster" ? 15 : 10);
+        const lowPass = filter("lowpass", effect === "monster" ? 1800 : 2800, 0, 0.7);
+        connect(low, lowPass);
+      } else if (effect === "high" || effect === "chipmunk" || effect === "cartoon") {
+        const high = filter("highshelf", 1500, effect === "chipmunk" ? 15 : 10);
+        const highPass = filter("highpass", effect === "cartoon" ? 420 : 260, 0, 0.7);
+        connect(highPass, high);
+      } else {
+        input.connect(destination);
+      }
+
+      await context.resume().catch(() => {});
+      outgoingTrack = destination.stream.getAudioTracks()[0];
+    } else {
+      clearVoiceGraph();
+    }
+
+    outgoingAudioTrackRef.current = outgoingTrack;
+    await Promise.all(
+      [...microphoneSendersRef.current.values()].map((sender) => sender.replaceTrack(outgoingTrack).catch(() => {}))
+    );
+    setVoiceEffectState(effect);
+  }, [ensureMedia]);
 
   const refreshLocalStreamState = useCallback(() => {
     if (!localStreamRef.current) {
@@ -99,6 +225,7 @@ export function useWebRtcRoom(socket, roomId) {
       if (recoveryTimer) window.clearTimeout(recoveryTimer);
       recoveryTimersRef.current.delete(peerId);
       peersRef.current.delete(peerId);
+      microphoneSendersRef.current.delete(peerId);
       pendingCandidatesRef.current.delete(peerId);
       peerStreamsRef.current.delete(peerId);
       const peerAudios = audioRef.current.get(peerId);
@@ -415,7 +542,11 @@ export function useWebRtcRoom(socket, roomId) {
       // Only the peer selected by the room handshake can create the first offer.
       pc.__galbaatCanOffer = Boolean(initiator);
 
-      stream.getAudioTracks().forEach((track) => pc.addTrack(track, stream));
+      const microphoneTrack = outgoingAudioTrackRef.current || stream.getAudioTracks()[0];
+      if (microphoneTrack) {
+        const sender = pc.addTrack(microphoneTrack, microphoneTrack === microphoneTrackRef.current ? stream : new MediaStream([microphoneTrack]));
+        microphoneSendersRef.current.set(peerId, sender);
+      }
       if (tabAudioTrackRef.current) {
         try {
           const sender = pc.addTrack(tabAudioTrackRef.current, new MediaStream([tabAudioTrackRef.current]));
@@ -757,9 +888,11 @@ export function useWebRtcRoom(socket, roomId) {
     const negotiating = negotiatingRef.current;
     const negotiationQueue = negotiationQueueRef.current;
     const recoveryTimers = recoveryTimersRef.current;
+    const microphoneSenders = microphoneSendersRef.current;
     return () => {
       peers.forEach((pc) => pc.close());
       peers.clear();
+      microphoneSenders.clear();
       pendingCandidates.clear();
       negotiating.clear();
       negotiationQueue.clear();
@@ -777,6 +910,18 @@ export function useWebRtcRoom(socket, roomId) {
       });
       audios.clear();
       displayAudioStreamRef.current?.getTracks().forEach((track) => track.stop());
+      voiceNodesRef.current.forEach((node) => {
+        node.disconnect();
+        node.stop?.();
+      });
+      voiceNodesRef.current = [];
+      voiceDestinationRef.current?.stream.getTracks().forEach((track) => track.stop());
+      voiceContextRef.current?.close().catch(() => {});
+      voiceContextRef.current = null;
+      voiceInputRef.current = null;
+      voiceDestinationRef.current = null;
+      microphoneTrackRef.current = null;
+      outgoingAudioTrackRef.current = null;
     };
   }, [roomId]);
 
@@ -791,7 +936,9 @@ export function useWebRtcRoom(socket, roomId) {
     startTabAudioShare,
     stopTabAudioShare,
     setPeerVolume,
+    setVoiceEffect,
     audioEnabled,
+    voiceEffect,
     videoEnabled,
     screenSharing,
     tabAudioSharing,

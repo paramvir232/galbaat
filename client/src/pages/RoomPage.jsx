@@ -7,6 +7,8 @@ import BrandMark from "../components/BrandMark.jsx";
 import ParticipantList from "../components/ParticipantList.jsx";
 import PushToTalk from "../components/PushToTalk.jsx";
 import ShareRoom from "../components/ShareRoom.jsx";
+import Soundboard from "../components/Soundboard.jsx";
+import VoiceChanger from "../components/VoiceChanger.jsx";
 import StatusPill from "../components/StatusPill.jsx";
 import VideoGrid from "../components/VideoGrid.jsx";
 import Whiteboard from "../components/Whiteboard.jsx";
@@ -44,7 +46,9 @@ export default function RoomPage() {
     stopTabAudioShare,
     tabAudioSharing,
     setPeerVolume,
+    setVoiceEffect,
     audioEnabled,
+    voiceEffect,
     videoEnabled,
     screenSharing,
     localStream,
@@ -86,6 +90,7 @@ export default function RoomPage() {
   const [joinPanelOpen, setJoinPanelOpen] = useState(false);
   const [lockedJoinPending, setLockedJoinPending] = useState(false);
   const [joinRetryKey, setJoinRetryKey] = useState(0);
+  const [roomFeatures, setRoomFeatures] = useState({ soundboardEnabled: true, voiceChangerEnabled: true });
   const speakingRef = useRef(false);
   const micLockedRef = useRef(false);
   const boardMuteRestoreLockRef = useRef(false);
@@ -413,6 +418,7 @@ export default function RoomPage() {
       setLockedJoinPending(false);
       setSelf(ack.user);
       setRoom(ack.room);
+      setRoomFeatures(ack.features || { soundboardEnabled: true, voiceChangerEnabled: true });
       setStatus("connected");
       try {
         const peers = ack.peers || [];
@@ -536,6 +542,11 @@ export default function RoomPage() {
     function onLock({ locked }) {
       setRoom((current) => (current ? { ...current, locked } : current));
     }
+    function onRoomFeatures(features) {
+      const nextFeatures = features || { soundboardEnabled: true, voiceChangerEnabled: true };
+      setRoomFeatures(nextFeatures);
+      if (!nextFeatures.voiceChangerEnabled) setVoiceEffect("none").catch(() => {});
+    }
     function onMutedByHost({ muted: nextMuted = true } = {}) {
       setMuted(Boolean(nextMuted));
       if (nextMuted) stopTalking(true);
@@ -578,6 +589,7 @@ export default function RoomPage() {
     socket.on("typing:start", onTypingStart);
     socket.on("typing:stop", onTypingStop);
     socket.on("room:lock", onLock);
+    socket.on("room:features", onRoomFeatures);
     socket.on("host:muted", onMutedByHost);
     socket.on("host:kicked", onKicked);
     socket.on("room:ended", onRoomEnded);
@@ -598,13 +610,14 @@ export default function RoomPage() {
       socket.off("typing:start", onTypingStart);
       socket.off("typing:stop", onTypingStop);
       socket.off("room:lock", onLock);
+      socket.off("room:features", onRoomFeatures);
       socket.off("host:muted", onMutedByHost);
       socket.off("host:kicked", onKicked);
       socket.off("room:ended", onRoomEnded);
       socket.off("room:join-requests", onJoinRequests);
       socket.off("room:join-approved", onJoinApproved);
     };
-  }, [connectToPeers, mobilePanel, navigate, notifyIncomingMessage, playHandRaiseAlert, playJoinAlert, playJoinRequestAlert, room, self?.clientId, self?.id, socket, stopTalking, syncPeers]);
+  }, [connectToPeers, mobilePanel, navigate, notifyIncomingMessage, playHandRaiseAlert, playJoinAlert, playJoinRequestAlert, room, self?.clientId, self?.id, setVoiceEffect, socket, stopTalking, syncPeers]);
 
   useEffect(() => {
     if (mobilePanel === "chat") setUnreadCount(0);
@@ -764,6 +777,18 @@ export default function RoomPage() {
       }
       setSelf(ack.user);
       setSettingsOpen(false);
+    });
+  }
+
+  function setRoomFeature(feature, enabled) {
+    socket.emit("room:feature", { roomId, feature, enabled }, (ack) => {
+      if (!ack?.ok) {
+        setSettingsError(ack?.error || "Unable to update room control");
+        return;
+      }
+      setSettingsError("");
+      setRoomFeatures(ack.features);
+      if (!ack.features.voiceChangerEnabled) setVoiceEffect("none").catch(() => {});
     });
   }
 
@@ -1174,6 +1199,8 @@ export default function RoomPage() {
               <Pencil className={`h-4 w-4 ${audioEnabled ? "text-mint" : "text-slate-400"}`} />
               Whiteboard
             </button>
+            <Soundboard socket={socket} roomId={roomId} disabled={!connected || !roomFeatures.soundboardEnabled} />
+            <VoiceChanger effect={voiceEffect} onChange={setVoiceEffect} disabled={!connected || !roomFeatures.voiceChangerEnabled} />
             <button
               type="button"
               disabled={!connected || videoBusy}
@@ -1323,6 +1350,38 @@ export default function RoomPage() {
                 </button>
               </div>
             </form>
+
+            {isHost && (
+              <section className="mt-5 border-t border-line pt-5">
+                <div className="mb-3">
+                  <h3 className="text-sm font-semibold text-slate-100">Room controls</h3>
+                  <p className="mt-1 text-xs text-slate-400">Choose which live effects everyone can use.</p>
+                </div>
+                <div className="space-y-2">
+                  {[
+                    ["soundboard", "Soundboard", "Allow room sound effects", roomFeatures.soundboardEnabled],
+                    ["voiceChanger", "Voice changer", "Allow live voice effects", roomFeatures.voiceChangerEnabled]
+                  ].map(([feature, label, description, enabled]) => (
+                    <div key={feature} className="flex items-center gap-3 rounded-lg border border-line bg-ink/50 p-3">
+                      <div className="min-w-0 flex-1">
+                        <p className="text-sm font-semibold text-slate-100">{label}</p>
+                        <p className="text-xs text-slate-500">{description}</p>
+                      </div>
+                      <button
+                        type="button"
+                        role="switch"
+                        aria-checked={enabled}
+                        onClick={() => setRoomFeature(feature, !enabled)}
+                        className={`relative h-6 w-11 shrink-0 rounded-full transition ${enabled ? "bg-mint" : "bg-white/15"}`}
+                        title={`${enabled ? "Disable" : "Enable"} ${label}`}
+                      >
+                        <span className={`absolute top-1 h-4 w-4 rounded-full bg-white shadow transition ${enabled ? "left-6" : "left-1"}`} />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </section>
+            )}
 
             <form onSubmit={sendSupportReport} className="mt-5 border-t border-line pt-5">
               <div className="flex items-start justify-between gap-3">

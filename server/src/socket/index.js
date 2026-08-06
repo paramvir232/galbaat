@@ -15,6 +15,10 @@ const boardEditPermissions = new Map();
 const boardEditRequests = new Map();
 const joinRequests = new Map();
 const approvedJoinSockets = new Map();
+const soundboardCooldowns = new Map();
+const soundboardSounds = new Set(["laugh", "clap", "airhorn", "whistle", "drumroll", "boo", "applause", "rimshot", "tada"]);
+const SOUNDBOARD_COOLDOWN_MS = 1200;
+const roomFeatures = new Map();
 
 function roomUsers(roomId) {
   if (!rooms.has(roomId)) rooms.set(roomId, new Map());
@@ -81,6 +85,13 @@ function boardParticipants(roomId) {
 
 function emitBoardUsers(io, roomId) {
   io.to(roomId).emit("whiteboard:users", boardParticipants(roomId));
+}
+
+function getRoomFeatures(roomId) {
+  if (!roomFeatures.has(roomId)) {
+    roomFeatures.set(roomId, { soundboardEnabled: true, voiceChangerEnabled: true });
+  }
+  return roomFeatures.get(roomId);
 }
 
 function roomBoardEditRequests(roomId) {
@@ -268,6 +279,7 @@ async function scheduleEmptyRoomCleanup(roomId) {
       boardUsers.delete(roomId);
       boardEditPermissions.delete(roomId);
       boardEditRequests.delete(roomId);
+      roomFeatures.delete(roomId);
       await deleteRoom(roomId);
     } catch (error) {
       console.error(`Empty room cleanup failed for ${roomId}`, error);
@@ -296,6 +308,7 @@ async function leaveCurrentRoom(io, socket) {
     return;
   }
   users.delete(socket.id);
+  soundboardCooldowns.delete(socket.id);
   const nextHost = ensureRoomHost(currentRoomId);
   boardUsers.get(currentRoomId)?.delete(socket.id);
   boardEditRequests.get(currentRoomId)?.delete(socket.id);
@@ -314,6 +327,7 @@ async function leaveCurrentRoom(io, socket) {
     boardUsers.delete(currentRoomId);
     boardEditPermissions.delete(currentRoomId);
     boardEditRequests.delete(currentRoomId);
+    roomFeatures.delete(currentRoomId);
     await scheduleEmptyRoomCleanup(currentRoomId);
     return;
   }
@@ -329,6 +343,7 @@ function removeDuplicateClientFromRoom(io, roomId, clientId, nextSocketId) {
   if (!duplicate) return null;
 
   users.delete(duplicate.id);
+  soundboardCooldowns.delete(duplicate.id);
   boardUsers.get(roomId)?.delete(duplicate.id);
   const oldSocket = io.sockets.sockets.get(duplicate.id);
   if (oldSocket) {
@@ -386,7 +401,7 @@ export function registerSocketHandlers(io) {
           const existingPeers = [...users.values()]
             .filter((participant) => participant.id !== socket.id)
             .map(publicUser);
-          ack?.({ ok: true, user: publicUser(existingUser), room, peers: existingPeers, alreadyJoined: true });
+          ack?.({ ok: true, user: publicUser(existingUser), room, peers: existingPeers, features: getRoomFeatures(normalizedRoomId), alreadyJoined: true });
           emitParticipants(io, normalizedRoomId);
           return;
         }
@@ -439,7 +454,7 @@ export function registerSocketHandlers(io) {
           .filter((participant) => participant.id !== socket.id)
           .map(publicUser);
 
-        ack?.({ ok: true, user: publicUser(user), room, peers: existingPeers });
+        ack?.({ ok: true, user: publicUser(user), room, peers: existingPeers, features: getRoomFeatures(normalizedRoomId) });
         // Existing members own the first offer, preventing first-join offer collisions.
         socket.to(normalizedRoomId).emit("webrtc:peer-ready", { id: socket.id });
         if (!replacedUser) socket.to(normalizedRoomId).emit("participant:joined", publicUser(user));
@@ -599,6 +614,58 @@ export function registerSocketHandlers(io) {
     socket.on("typing:stop", ({ roomId }) => {
       const normalizedRoomId = String(roomId || socket.data.roomId || "").toUpperCase();
       socket.to(normalizedRoomId).emit("typing:stop", { id: socket.id });
+    });
+
+    socket.on("room:feature", ({ roomId, feature, enabled }, ack) => {
+      const normalizedRoomId = String(roomId || socket.data.roomId || "").toUpperCase();
+      const user = rooms.get(normalizedRoomId)?.get(socket.id);
+      if (!user?.host) {
+        ack?.({ ok: false, error: "Only the room admin can change room controls" });
+        return;
+      }
+      const featureKey = feature === "soundboard" ? "soundboardEnabled" : feature === "voiceChanger" ? "voiceChangerEnabled" : "";
+      if (!featureKey) {
+        ack?.({ ok: false, error: "Unknown room control" });
+        return;
+      }
+      const features = getRoomFeatures(normalizedRoomId);
+      features[featureKey] = Boolean(enabled);
+      io.to(normalizedRoomId).emit("room:features", features);
+      ack?.({ ok: true, features });
+    });
+
+    socket.on("soundboard:play", ({ roomId, soundId }, ack) => {
+      const normalizedRoomId = String(roomId || socket.data.roomId || "").toUpperCase();
+      const user = rooms.get(normalizedRoomId)?.get(socket.id);
+      if (!user) {
+        ack?.({ ok: false, error: "Not in room" });
+        return;
+      }
+      if (!getRoomFeatures(normalizedRoomId).soundboardEnabled) {
+        ack?.({ ok: false, error: "Soundboard is disabled by the room admin" });
+        return;
+      }
+      if (!soundboardSounds.has(soundId)) {
+        ack?.({ ok: false, error: "That sound is unavailable" });
+        return;
+      }
+
+      const now = Date.now();
+      const lastPlayedAt = soundboardCooldowns.get(socket.id) || 0;
+      const remaining = SOUNDBOARD_COOLDOWN_MS - (now - lastPlayedAt);
+      if (remaining > 0) {
+        ack?.({ ok: false, error: "Please wait before playing another sound.", retryAfter: remaining });
+        return;
+      }
+
+      soundboardCooldowns.set(socket.id, now);
+      io.to(normalizedRoomId).emit("soundboard:play", {
+        soundId,
+        username: user.username,
+        playedAt: now
+      });
+      ack?.({ ok: true, cooldownMs: SOUNDBOARD_COOLDOWN_MS });
+      touchRoom(normalizedRoomId, rooms.get(normalizedRoomId).size).catch(() => {});
     });
 
     socket.on("ptt:speaking", ({ roomId, speaking }) => {
