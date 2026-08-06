@@ -334,6 +334,8 @@ export default function Whiteboard({ open, roomId, socket, currentUser, particip
   const [chatCollapsed, setChatCollapsed] = useState(false);
   const [exportMenuOpen, setExportMenuOpen] = useState(false);
   const [canEditBoard, setCanEditBoard] = useState(Boolean(currentUser?.host));
+  const [editRequests, setEditRequests] = useState([]);
+  const [editRequestPending, setEditRequestPending] = useState(false);
   const [openVolumeId, setOpenVolumeId] = useState(null);
   const [isDragging, setIsDragging] = useState(false);
   const [marquee, setMarquee] = useState(null);
@@ -420,6 +422,8 @@ export default function Whiteboard({ open, roomId, socket, currentUser, particip
       backgroundRef.current = board.background || "#0f172a";
       setBoardUsers(board.users || []);
       setCanEditBoard(Boolean(ack.canEditBoard || currentUser?.host));
+      setEditRequests(ack.editRequests || []);
+      setEditRequestPending(false);
       setHistory([]);
       setRedoStack([]);
     });
@@ -487,6 +491,14 @@ export default function Whiteboard({ open, roomId, socket, currentUser, particip
     }
     function onPermission({ canEditBoard: nextCanEdit }) {
       setCanEditBoard(Boolean(nextCanEdit));
+      if (nextCanEdit) setEditRequestPending(false);
+    }
+    function onEditRequests(requests) {
+      setEditRequests(requests || []);
+    }
+    function onEditRequestResolved({ approved }) {
+      setEditRequestPending(false);
+      if (approved) setError("Edit access granted by the admin.");
     }
 
     socket.on("whiteboard:update", onBoardUpdate);
@@ -496,6 +508,8 @@ export default function Whiteboard({ open, roomId, socket, currentUser, particip
     socket.on("whiteboard:selection", onSelection);
     socket.on("whiteboard:users", onBoardUsers);
     socket.on("whiteboard:permission", onPermission);
+    socket.on("whiteboard:edit-requests", onEditRequests);
+    socket.on("whiteboard:edit-request:resolved", onEditRequestResolved);
     return () => {
       window.clearTimeout(saveTimerRef.current);
       socket.emit("whiteboard:leave", { roomId });
@@ -506,6 +520,8 @@ export default function Whiteboard({ open, roomId, socket, currentUser, particip
       socket.off("whiteboard:selection", onSelection);
       socket.off("whiteboard:users", onBoardUsers);
       socket.off("whiteboard:permission", onPermission);
+      socket.off("whiteboard:edit-requests", onEditRequests);
+      socket.off("whiteboard:edit-request:resolved", onEditRequestResolved);
     };
   }, [currentUser?.host, currentUser?.id, open, roomId, socket]);
 
@@ -843,6 +859,18 @@ export default function Whiteboard({ open, roomId, socket, currentUser, particip
     socket.emit("whiteboard:permission", { roomId, targetId, canEdit: nextCanEdit });
   }
 
+  function requestBoardEditAccess() {
+    if (editRequestPending) return;
+    setError("");
+    socket.emit("whiteboard:edit-request", { roomId }, (ack) => {
+      if (!ack?.ok) {
+        setError(ack?.error || "Unable to request edit access.");
+        return;
+      }
+      setEditRequestPending(true);
+    });
+  }
+
   useEffect(() => {
     if (!open) return undefined;
     function handleKey(event) {
@@ -1052,7 +1080,7 @@ export default function Whiteboard({ open, roomId, socket, currentUser, particip
 
   return (
     <div className="fixed inset-0 z-50 flex flex-col bg-black text-slate-100">
-      <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-line bg-black/90 px-3 py-2.5 backdrop-blur-xl">
+      <div className="relative z-[70] flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-line bg-black/90 px-3 py-2.5 backdrop-blur-xl">
         <div className="flex min-w-0 items-center gap-2.5">
           <BrandMark className="w-[90px] sm:w-[130px] h-auto" />
           <div>
@@ -1099,7 +1127,7 @@ export default function Whiteboard({ open, roomId, socket, currentUser, particip
               <Download className="h-4 w-4" />
             </button>
             {exportMenuOpen && (
-              <div className="apple-surface absolute right-0 top-12 z-50 w-52 overflow-hidden rounded-xl shadow-2xl">
+              <div className="apple-surface absolute right-0 top-12 z-[80] w-52 overflow-hidden rounded-xl shadow-2xl">
                 <button type="button" onClick={downloadAsImage} className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-sm text-slate-200 hover:bg-white/10">
                   <FileImage className="h-4 w-4 text-mint" />
                   Download as image
@@ -1136,6 +1164,21 @@ export default function Whiteboard({ open, roomId, socket, currentUser, particip
         ) : (
         <div className="absolute bottom-3 left-3 top-3 z-30 w-[min(20rem,calc(100%-1.5rem))] overflow-y-auto rounded-xl border border-line bg-panel/95 p-3 shadow-2xl backdrop-blur">
           <div className="space-y-4">
+            {!canEditBoard && (
+              <section className="rounded-lg border border-amberglow/30 bg-amberglow/10 p-3">
+                <p className="text-sm font-semibold text-slate-100">View-only board</p>
+                <p className="mt-1 text-xs leading-5 text-slate-300">Request edit permission from the room admin to draw and make changes.</p>
+                <button
+                  type="button"
+                  onClick={requestBoardEditAccess}
+                  disabled={editRequestPending}
+                  className="mt-3 inline-flex min-h-9 items-center gap-2 rounded-md border border-amberglow/40 bg-black/20 px-3 text-xs font-bold text-amberglow transition hover:bg-amberglow/15 disabled:cursor-not-allowed disabled:opacity-65"
+                >
+                  <Pencil className="h-3.5 w-3.5" />
+                  {editRequestPending ? "Request sent" : "Request edit access"}
+                </button>
+              </section>
+            )}
             <section>
               <div className="mb-2 flex items-center justify-between gap-2">
                 <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wide text-slate-400">
@@ -1201,6 +1244,32 @@ export default function Whiteboard({ open, roomId, socket, currentUser, particip
                 />
               </label>
             </section>
+
+            {currentUser?.host && editRequests.length > 0 && (
+              <section className="rounded-lg border border-mint/30 bg-mint/10 p-3">
+                <div className="mb-2 flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wide text-mint">
+                    <Pencil className="h-4 w-4" />
+                    Edit requests
+                  </div>
+                  <span className="grid h-5 min-w-5 place-items-center rounded-full bg-mint px-1 text-[11px] font-bold text-ink">{editRequests.length}</span>
+                </div>
+                <div className="space-y-2">
+                  {editRequests.map((request) => (
+                    <div key={request.id} className="flex items-center gap-2 rounded-md border border-line bg-ink/50 p-2">
+                      <span className="min-w-0 flex-1 truncate text-sm font-semibold text-slate-100">{request.username}</span>
+                      <button
+                        type="button"
+                        onClick={() => setBoardEditPermission(request.id, true)}
+                        className="min-h-8 rounded-md bg-mint px-2.5 text-xs font-bold text-ink hover:bg-mint/90"
+                      >
+                        Allow
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </section>
+            )}
 
             <section>
               <div className="mb-2 flex items-center gap-2 text-xs font-bold uppercase tracking-wide text-slate-400">

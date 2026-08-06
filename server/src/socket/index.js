@@ -12,6 +12,7 @@ const boardUsers = new Map();
 const boardStates = new Map();
 const boardSaveTimers = new Map();
 const boardEditPermissions = new Map();
+const boardEditRequests = new Map();
 const joinRequests = new Map();
 const approvedJoinSockets = new Map();
 
@@ -80,6 +81,27 @@ function boardParticipants(roomId) {
 
 function emitBoardUsers(io, roomId) {
   io.to(roomId).emit("whiteboard:users", boardParticipants(roomId));
+}
+
+function roomBoardEditRequests(roomId) {
+  if (!boardEditRequests.has(roomId)) boardEditRequests.set(roomId, new Map());
+  return boardEditRequests.get(roomId);
+}
+
+function publicBoardEditRequest(request) {
+  return {
+    id: request.id,
+    username: request.username,
+    requestedAt: request.requestedAt
+  };
+}
+
+function emitBoardEditRequests(io, roomId) {
+  const requests = [...roomBoardEditRequests(roomId).values()].map(publicBoardEditRequest);
+  [...roomUsers(roomId).values()]
+    .filter((user) => user.host)
+    .forEach((host) => io.to(host.id).emit("whiteboard:edit-requests", requests));
+  return requests;
 }
 
 function ensureRoomHost(roomId) {
@@ -245,6 +267,7 @@ async function scheduleEmptyRoomCleanup(roomId) {
       boardStates.delete(roomId);
       boardUsers.delete(roomId);
       boardEditPermissions.delete(roomId);
+      boardEditRequests.delete(roomId);
       await deleteRoom(roomId);
     } catch (error) {
       console.error(`Empty room cleanup failed for ${roomId}`, error);
@@ -275,8 +298,10 @@ async function leaveCurrentRoom(io, socket) {
   users.delete(socket.id);
   const nextHost = ensureRoomHost(currentRoomId);
   boardUsers.get(currentRoomId)?.delete(socket.id);
+  boardEditRequests.get(currentRoomId)?.delete(socket.id);
   emitBoardUsers(io, currentRoomId);
   if (nextHost) emitJoinRequests(io, currentRoomId);
+  emitBoardEditRequests(io, currentRoomId);
   socket.leave(currentRoomId);
 
   socket.to(currentRoomId).emit("participant:left", {
@@ -288,6 +313,7 @@ async function leaveCurrentRoom(io, socket) {
   if (count === 0) {
     boardUsers.delete(currentRoomId);
     boardEditPermissions.delete(currentRoomId);
+    boardEditRequests.delete(currentRoomId);
     await scheduleEmptyRoomCleanup(currentRoomId);
     return;
   }
@@ -668,6 +694,7 @@ export function registerSocketHandlers(io) {
         ack?.({
           ok: true,
           canEditBoard: canEditBoard(normalizedRoomId, user),
+          editRequests: user.host ? emitBoardEditRequests(io, normalizedRoomId) : [],
           board: publicBoardState(normalizedRoomId, { users: boardParticipants(normalizedRoomId) })
         });
         emitBoardUsers(io, normalizedRoomId);
@@ -773,7 +800,35 @@ export function registerSocketHandlers(io) {
       if (canEdit) editors.add(target.id);
       else editors.delete(target.id);
       io.to(target.id).emit("whiteboard:permission", { canEditBoard: canEditBoard(normalizedRoomId, target) });
+      if (canEdit && roomBoardEditRequests(normalizedRoomId).delete(target.id)) {
+        io.to(target.id).emit("whiteboard:edit-request:resolved", { approved: true });
+        emitBoardEditRequests(io, normalizedRoomId);
+      }
       emitBoardUsers(io, normalizedRoomId);
+    });
+
+    socket.on("whiteboard:edit-request", ({ roomId }, ack) => {
+      const normalizedRoomId = String(roomId || socket.data.roomId || "").toUpperCase();
+      const user = rooms.get(normalizedRoomId)?.get(socket.id);
+      if (!user) {
+        ack?.({ ok: false, error: "Not in room" });
+        return;
+      }
+      if (user.host || canEditBoard(normalizedRoomId, user)) {
+        ack?.({ ok: false, error: "You already have edit access" });
+        return;
+      }
+
+      const requests = roomBoardEditRequests(normalizedRoomId);
+      if (!requests.has(user.id)) {
+        requests.set(user.id, {
+          id: user.id,
+          username: user.username,
+          requestedAt: new Date().toISOString()
+        });
+        emitBoardEditRequests(io, normalizedRoomId);
+      }
+      ack?.({ ok: true, pending: true });
     });
 
     socket.on("whiteboard:cursor", ({ roomId, cursor }) => {
