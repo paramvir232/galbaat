@@ -435,6 +435,10 @@ export function registerSocketHandlers(io) {
 
         const replacedUser = removeDuplicateClientFromRoom(io, normalizedRoomId, clientIdClean, socket.id);
         if (replacedUser?.host && !isOriginalHost) ensureRoomHost(normalizedRoomId);
+        if (users.size >= env.maxRoomParticipants) {
+          ack?.({ ok: false, error: `This room is full. Talkietiv rooms support up to ${env.maxRoomParticipants} participants.` });
+          return;
+        }
 
         const user = {
           id: socket.id,

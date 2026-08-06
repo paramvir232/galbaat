@@ -19,6 +19,17 @@ function displayMediaConstraints() {
   };
 }
 
+async function optimizeVoiceSender(sender) {
+  const parameters = sender.getParameters();
+  if (!parameters.encodings?.length) return;
+  parameters.encodings = parameters.encodings.map((encoding) => ({
+    ...encoding,
+    // A 48 kbps Opus ceiling keeps 10-15 peer audio uploads practical while preserving clear speech.
+    maxBitrate: 48_000
+  }));
+  await sender.setParameters(parameters);
+}
+
 export function useWebRtcRoom(socket, roomId) {
   const [localStream, setLocalStream] = useState(null);
   const [mediaError, setMediaError] = useState("");
@@ -609,6 +620,7 @@ export function useWebRtcRoom(socket, roomId) {
       if (microphoneTrack) {
         const sender = pc.addTrack(microphoneTrack, microphoneTrack === microphoneTrackRef.current ? stream : new MediaStream([microphoneTrack]));
         microphoneSendersRef.current.set(peerId, sender);
+        optimizeVoiceSender(sender).catch(() => {});
       }
       if (tabAudioTrackRef.current) {
         try {

@@ -43,6 +43,7 @@ Server variables:
 - `MONGODB_URI`: MongoDB connection string.
 - `RATE_LIMIT_WINDOW_MS`: rate-limit window.
 - `RATE_LIMIT_MAX`: max requests per window.
+- `MAX_ROOM_PARTICIPANTS`: audio-mesh room limit, capped at 15 for reliable browser-to-browser calling.
 - `SUPPORT_SMTP_USER` and `SUPPORT_SMTP_PASSWORD`: Gmail address and Gmail App Password used to send anonymous support reports.
 - `SUPPORT_EMAIL_TO`: recipient address for support reports (defaults to `talkitiv01@gmail.com`).
 
