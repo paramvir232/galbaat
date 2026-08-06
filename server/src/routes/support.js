@@ -2,6 +2,9 @@ import express from "express";
 import rateLimit from "express-rate-limit";
 import multer from "multer";
 import nodemailer from "nodemailer";
+import { resolve4 } from "node:dns/promises";
+import net from "node:net";
+import tls from "node:tls";
 import { env } from "../config/env.js";
 import { cleanText } from "../utils/sanitize.js";
 
@@ -30,13 +33,64 @@ const screenshotUpload = multer({
   }
 });
 
+function createGmailIpv4Socket({ port, secure }) {
+  return (_options, callback) => {
+    let finished = false;
+    const finish = (error, socketOptions) => {
+      if (finished) return;
+      finished = true;
+      callback(error, socketOptions);
+    };
+
+    resolve4(env.supportSmtpHost)
+      .then((addresses) => {
+        if (!addresses.length) {
+          const error = new Error("No IPv4 address was found for the Gmail SMTP host.");
+          error.code = "ENOTFOUND";
+          finish(error);
+          return;
+        }
+
+        let addressIndex = 0;
+        const connectNextAddress = (lastError) => {
+          const address = addresses[addressIndex++];
+          if (!address) {
+            finish(lastError);
+            return;
+          }
+
+          const socket = secure
+            ? tls.connect({ host: address, port, family: 4, servername: env.supportSmtpHost, minVersion: "TLSv1.2" })
+            : net.connect({ host: address, port, family: 4 });
+          const connectedEvent = secure ? "secureConnect" : "connect";
+
+          const onError = (error) => {
+            socket.removeListener(connectedEvent, onConnect);
+            socket.destroy();
+            connectNextAddress(error);
+          };
+          const onConnect = () => {
+            socket.removeListener("error", onError);
+            finish(null, { connection: socket, secured: secure });
+          };
+
+          socket.once("error", onError);
+          socket.once(connectedEvent, onConnect);
+        };
+
+        connectNextAddress();
+      })
+      .catch((error) => finish(error));
+  };
+}
+
 function supportMailer({ port = env.supportSmtpPort, secure = env.supportSmtpSecure } = {}) {
   return nodemailer.createTransport({
     host: env.supportSmtpHost,
     port,
     secure,
     requireTLS: !secure,
-    family: 4,
+    ...(env.supportSmtpHost === "smtp.gmail.com" ? { getSocket: createGmailIpv4Socket({ port, secure }) } : {}),
     auth: {
       user: env.supportSmtpUser,
       pass: env.supportSmtpPassword
@@ -49,7 +103,7 @@ function supportMailer({ port = env.supportSmtpPort, secure = env.supportSmtpSec
 }
 
 function isRetryableTransportError(error) {
-  return ["ECONNECTION", "ECONNREFUSED", "ECONNRESET", "ENOTFOUND", "ESOCKET", "ETIMEDOUT", "EHOSTUNREACH"].includes(error?.code);
+  return ["ECONNECTION", "ECONNREFUSED", "ECONNRESET", "EDNS", "ENOTFOUND", "ESOCKET", "ETIMEDOUT", "ETLS", "EHOSTUNREACH"].includes(error?.code);
 }
 
 function publicTransportError(error) {
@@ -58,6 +112,7 @@ function publicTransportError(error) {
   if (code === "ENOTFOUND") return "Support email could not resolve the Gmail server (SMTP_ENOTFOUND).";
   if (code === "ECONNREFUSED") return "Gmail refused the support email connection (SMTP_ECONNREFUSED).";
   if (code === "ESOCKET") return "The secure Gmail connection could not be established (SMTP_ESOCKET).";
+  if (code === "ETLS") return "The Gmail TLS upgrade could not be completed (SMTP_ETLS).";
   return `Support email transport failed (${code}).`;
 }
 
