@@ -30,19 +30,45 @@ const screenshotUpload = multer({
   }
 });
 
-function supportMailer() {
+function supportMailer({ port = env.supportSmtpPort, secure = env.supportSmtpSecure } = {}) {
   return nodemailer.createTransport({
     host: env.supportSmtpHost,
-    port: env.supportSmtpPort,
-    secure: env.supportSmtpSecure,
+    port,
+    secure,
+    requireTLS: !secure,
     auth: {
       user: env.supportSmtpUser,
       pass: env.supportSmtpPassword
     },
-    connectionTimeout: 12_000,
-    greetingTimeout: 12_000,
-    socketTimeout: 25_000
+    tls: { minVersion: "TLSv1.2", servername: env.supportSmtpHost },
+    connectionTimeout: 10_000,
+    greetingTimeout: 10_000,
+    socketTimeout: 20_000
   });
+}
+
+function isRetryableTransportError(error) {
+  return ["ECONNECTION", "ECONNREFUSED", "ECONNRESET", "ENOTFOUND", "ESOCKET", "ETIMEDOUT", "EHOSTUNREACH"].includes(error?.code);
+}
+
+async function deliverSupportEmail(message) {
+  const attempts = [{ port: env.supportSmtpPort, secure: env.supportSmtpSecure }];
+  // Gmail supports both implicit TLS (465) and STARTTLS (587). Hosted networks
+  // occasionally reject 465, so retry the equivalent secure Gmail transport once.
+  if (env.supportSmtpHost === "smtp.gmail.com" && (env.supportSmtpPort !== 587 || env.supportSmtpSecure)) {
+    attempts.push({ port: 587, secure: false });
+  }
+
+  let lastError;
+  for (const attempt of attempts) {
+    try {
+      return await supportMailer(attempt).sendMail(message);
+    } catch (error) {
+      lastError = error;
+      if (!isRetryableTransportError(error)) throw error;
+    }
+  }
+  throw lastError;
 }
 
 supportRouter.post("/", supportRateLimit, screenshotUpload.single("screenshot"), async (req, res) => {
@@ -58,8 +84,8 @@ supportRouter.post("/", supportRateLimit, screenshotUpload.single("screenshot"),
       return res.status(503).json({ message: "Support inbox is not configured yet." });
     }
 
-    await supportMailer().sendMail({
-      from: `Talkietiv Support <${env.supportSmtpUser}>`,
+    await deliverSupportEmail({
+      from: `Talkietiv Support <${env.supportEmailFrom || env.supportSmtpUser}>`,
       to: env.supportEmailTo,
       subject: `[Talkietiv] Anonymous ${category === "bug" ? "bug report" : "query"}`,
       text: `Anonymous ${category === "bug" ? "bug report" : "query"}\n\n${message}\n\nSent: ${new Date().toISOString()}`,
@@ -75,7 +101,7 @@ supportRouter.post("/", supportRateLimit, screenshotUpload.single("screenshot"),
     if (error.code === "EAUTH" || error.responseCode === 535) {
       return res.status(502).json({ message: "Support email authentication failed. Please contact the site owner." });
     }
-    if (["ECONNECTION", "ETIMEDOUT", "ESOCKET"].includes(error.code)) {
+    if (isRetryableTransportError(error)) {
       return res.status(503).json({ message: "Support email service is temporarily unavailable. Please try again shortly." });
     }
     return res.status(502).json({ message: "Unable to send your message right now. Please try again shortly." });
