@@ -47,7 +47,7 @@ function attachmentPreviewType(file) {
   return "document";
 }
 
-function PdfPreview({ url, name }) {
+function PdfPreview({ data, name }) {
   const canvasRef = useRef(null);
   const [pdf, setPdf] = useState(null);
   const [pageNumber, setPageNumber] = useState(1);
@@ -55,7 +55,7 @@ function PdfPreview({ url, name }) {
   const [rendering, setRendering] = useState(true);
 
   useEffect(() => {
-    if (!url) return undefined;
+    if (!data) return undefined;
     let cancelled = false;
     let loadingTask;
     setPdf(null);
@@ -66,22 +66,26 @@ function PdfPreview({ url, name }) {
     loadPdfJs()
       .then(({ getDocument }) => {
         if (cancelled) return null;
-        loadingTask = getDocument({ url });
+        // Copy the bytes because PDF.js transfers its input to the worker.
+        loadingTask = getDocument({ data: new Uint8Array(data).slice() });
         return loadingTask.promise;
       })
       .then((document) => {
         if (!document) return;
         if (!cancelled) setPdf(document);
       })
-      .catch(() => {
-        if (!cancelled) setError("This PDF could not be rendered in the preview.");
+      .catch((loadError) => {
+        if (!cancelled) {
+          window.console.error("Talkietiv PDF preview failed", loadError);
+          setError(loadError?.message ? `This PDF could not be rendered: ${loadError.message}` : "This PDF could not be rendered in the preview.");
+        }
       });
 
     return () => {
       cancelled = true;
       loadingTask?.destroy();
     };
-  }, [url]);
+  }, [data]);
 
   useEffect(() => {
     if (!pdf || !canvasRef.current) return undefined;
@@ -346,28 +350,27 @@ export default function ChatPanel({
     }
 
     const controller = new window.AbortController();
-    let objectUrl = "";
-    setAttachmentPreviewContent({ loading: true, url: "", text: "", error: "" });
+    setAttachmentPreviewContent({ loading: true, data: null, text: "", error: "" });
 
     fetch(attachmentPreview.url, { signal: controller.signal })
       .then(async (response) => {
         if (!response.ok) throw new Error("Preview could not be loaded");
         if (attachmentPreview.type === "text") {
           const text = await response.text();
-          if (!controller.signal.aborted) setAttachmentPreviewContent({ loading: false, url: "", text, error: "" });
+          if (!controller.signal.aborted) setAttachmentPreviewContent({ loading: false, data: null, text, error: "" });
           return;
         }
-        const blob = await response.blob();
-        objectUrl = window.URL.createObjectURL(blob);
-        if (!controller.signal.aborted) setAttachmentPreviewContent({ loading: false, url: objectUrl, text: "", error: "" });
+        const data = await response.arrayBuffer();
+        const header = new window.TextDecoder("latin1").decode(new Uint8Array(data, 0, Math.min(data.byteLength, 1024)));
+        if (!header.includes("%PDF-")) throw new Error("The server did not return a valid PDF file.");
+        if (!controller.signal.aborted) setAttachmentPreviewContent({ loading: false, data, text: "", error: "" });
       })
       .catch((error) => {
-        if (!controller.signal.aborted) setAttachmentPreviewContent({ loading: false, url: "", text: "", error: error.message || "Preview could not be loaded" });
+        if (!controller.signal.aborted) setAttachmentPreviewContent({ loading: false, data: null, text: "", error: error.message || "Preview could not be loaded" });
       });
 
     return () => {
       controller.abort();
-      if (objectUrl) window.URL.revokeObjectURL(objectUrl);
     };
   }, [attachmentPreview]);
 
@@ -1148,7 +1151,7 @@ export default function ChatPanel({
                 ) : attachmentPreviewContent?.error ? (
                   <div className="grid h-full place-items-center px-6 text-center text-sm text-rose-300">{attachmentPreviewContent.error}</div>
                 ) : (
-                  <PdfPreview url={attachmentPreviewContent?.url} name={attachmentPreview.name} />
+                  <PdfPreview data={attachmentPreviewContent?.data} name={attachmentPreview.name} />
                 )
               ) : (
                 <div className="grid h-full place-items-center px-6 text-center text-sm text-slate-400">This file type cannot be previewed in the browser. Use the download button to open it.</div>
