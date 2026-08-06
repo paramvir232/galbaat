@@ -741,6 +741,7 @@ export default function RoomPage() {
 
   function endRoom() {
     socket.emit("room:end", { roomId });
+    navigate("/");
   }
 
   function hostMute(targetId, muted) {

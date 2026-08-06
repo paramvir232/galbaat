@@ -12,7 +12,7 @@ export default function ShareRoom({ roomId }) {
   const qrPopover = showQr
     ? createPortal(
         <div
-          className="apple-surface fixed z-[9999] rounded-xl p-3 shadow-2xl"
+          className="fixed z-[9999] rounded-xl bg-white p-3 shadow-2xl"
           style={qrPosition}
         >
           <QRCodeSVG value={inviteUrl} size={152} bgColor="#FFFFFF" fgColor="#000000" />
