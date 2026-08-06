@@ -38,6 +38,7 @@ export function useWebRtcRoom(socket, roomId) {
   const negotiationQueueRef = useRef(new Set());
   const creatingPeersRef = useRef(new Map());
   const pendingOffersRef = useRef(new Map());
+  const recoveryTimersRef = useRef(new Map());
   const [tabAudioSharing, setTabAudioSharing] = useState(false);
   const tabAudioTrackRef = useRef(null);
   const tabAudioSendersRef = useRef(new Map());
@@ -94,6 +95,9 @@ export function useWebRtcRoom(socket, roomId) {
   const removePeer = useCallback(
     (peerId) => {
       peersRef.current.get(peerId)?.close();
+      const recoveryTimer = recoveryTimersRef.current.get(peerId);
+      if (recoveryTimer) window.clearTimeout(recoveryTimer);
+      recoveryTimersRef.current.delete(peerId);
       peersRef.current.delete(peerId);
       pendingCandidatesRef.current.delete(peerId);
       peerStreamsRef.current.delete(peerId);
@@ -432,20 +436,36 @@ export function useWebRtcRoom(socket, roomId) {
         }
       };
 
+      const scheduleIceRecovery = () => {
+        const previousTimer = recoveryTimersRef.current.get(peerId);
+        if (previousTimer) window.clearTimeout(previousTimer);
+        const timer = window.setTimeout(() => {
+          recoveryTimersRef.current.delete(peerId);
+          if (peersRef.current.get(peerId) !== pc || pc.connectionState === "closed") return;
+          if (pc.connectionState === "disconnected" || pc.connectionState === "failed" || pc.iceConnectionState === "disconnected" || pc.iceConnectionState === "failed") {
+            pc.restartIce?.();
+            renegotiatePeer(peerId, pc).catch(() => {});
+          }
+        }, 3000);
+        recoveryTimersRef.current.set(peerId, timer);
+      };
+
+      const clearIceRecovery = () => {
+        const timer = recoveryTimersRef.current.get(peerId);
+        if (timer) window.clearTimeout(timer);
+        recoveryTimersRef.current.delete(peerId);
+      };
+
       pc.onconnectionstatechange = () => {
         setPeerStates((current) => ({ ...current, [peerId]: pc.connectionState }));
-        if (pc.connectionState === "failed") {
-          pc.restartIce?.();
-          renegotiatePeer(peerId, pc).catch(() => {});
-        }
+        if (pc.connectionState === "connected") clearIceRecovery();
+        if (pc.connectionState === "disconnected" || pc.connectionState === "failed") scheduleIceRecovery();
       };
 
       pc.oniceconnectionstatechange = () => {
         setPeerStates((current) => ({ ...current, [peerId]: pc.iceConnectionState }));
-        if (pc.iceConnectionState === "failed") {
-          pc.restartIce?.();
-          renegotiatePeer(peerId, pc).catch(() => {});
-        }
+        if (pc.iceConnectionState === "connected" || pc.iceConnectionState === "completed") clearIceRecovery();
+        if (pc.iceConnectionState === "disconnected" || pc.iceConnectionState === "failed") scheduleIceRecovery();
       };
 
       pc.onnegotiationneeded = () => {
@@ -570,11 +590,15 @@ export function useWebRtcRoom(socket, roomId) {
   );
 
   const connectToPeers = useCallback(
-    async (peers, initiator = true) => {
+    async (peers) => {
       await ensureMedia();
-      await Promise.all(peers.map((peer) => createPeer(peer.id, initiator)));
+      await Promise.all(
+        peers
+          .filter((peer) => peer?.id && peer.id !== socket.id)
+          .map((peer) => createPeer(peer.id, socket.id > peer.id))
+      );
     },
-    [createPeer, ensureMedia]
+    [createPeer, ensureMedia, socket.id]
   );
 
   const processPendingOffer = useCallback(
@@ -732,12 +756,15 @@ export function useWebRtcRoom(socket, roomId) {
     const peerStreams = peerStreamsRef.current;
     const negotiating = negotiatingRef.current;
     const negotiationQueue = negotiationQueueRef.current;
+    const recoveryTimers = recoveryTimersRef.current;
     return () => {
       peers.forEach((pc) => pc.close());
       peers.clear();
       pendingCandidates.clear();
       negotiating.clear();
       negotiationQueue.clear();
+      recoveryTimers.forEach((timer) => window.clearTimeout(timer));
+      recoveryTimers.clear();
       localStreamRef.current?.getTracks().forEach((track) => track.stop());
       localStreamRef.current = null;
       peerStreams.clear();

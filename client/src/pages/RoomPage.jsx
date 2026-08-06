@@ -350,10 +350,8 @@ export default function RoomPage() {
       socket.disconnect();
     }
     window.addEventListener("beforeunload", handleBeforeUnload);
-    window.addEventListener("pagehide", handleBeforeUnload);
     return () => {
       window.removeEventListener("beforeunload", handleBeforeUnload);
-      window.removeEventListener("pagehide", handleBeforeUnload);
     };
   }, [roomId, socket]);
 
@@ -413,9 +411,7 @@ export default function RoomPage() {
         const peers = ack.peers || [];
         syncPeers(peers.map((peer) => peer.id));
         await ensureMedia();
-        // Existing room members make the first offer. The joining member is the
-        // answerer, which prevents both browsers from offering at once.
-        await connectToPeers(peers, false);
+        await connectToPeers(peers);
         if (speakingRef.current) {
           socket.emit("ptt:speaking", { roomId, speaking: true });
         }
@@ -464,14 +460,9 @@ export default function RoomPage() {
       if (currentSelf) {
         setSelf(currentSelf);
         setMuted(Boolean(currentSelf.muted));
-        const peers = deduped
-          .filter((user) => user.id !== currentSelf.id)
-          .map((user) => ({
-            ...user,
-            initiator: false
-          }));
+        const peers = deduped.filter((user) => user.id !== currentSelf.id);
         syncPeers(peers.map((user) => user.id));
-        connectToPeers(peers, false).catch(() => setStatus((current) => (current === "connected" ? "voice-limited" : current)));
+        connectToPeers(peers).catch(() => setStatus((current) => (current === "connected" ? "voice-limited" : current)));
       }
     }
     function onJoined(user) {
@@ -488,7 +479,7 @@ export default function RoomPage() {
     }
     function onPeerReady({ id }) {
       if (!id || id === self?.id) return;
-      connectToPeers([{ id }], true).catch(() => setStatus((current) => (current === "connected" ? "voice-limited" : current)));
+      connectToPeers([{ id }]).catch(() => setStatus((current) => (current === "connected" ? "voice-limited" : current)));
     }
     function onLeft(user) {
       setMessages((current) => [
