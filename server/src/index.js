@@ -12,6 +12,7 @@ import { Server } from "socket.io";
 import { env } from "./config/env.js";
 import { connectDb } from "./config/db.js";
 import { roomsRouter } from "./routes/rooms.js";
+import { supportRouter } from "./routes/support.js";
 import { cleanupInactiveRooms } from "./services/roomService.js";
 import { registerSocketHandlers } from "./socket/index.js";
 
@@ -66,6 +67,7 @@ app.get("/api/health", (_req, res) => {
 });
 
 app.use("/api/rooms", roomsRouter);
+app.use("/api/support", supportRouter);
 
 if (env.nodeEnv === "production") {
   const clientDist = path.resolve(__dirname, "../../client/dist");

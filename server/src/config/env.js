@@ -27,5 +27,12 @@ export const env = {
   mongoUri: process.env.MONGODB_URI || "mongodb://127.0.0.1:27017/galbaat",
   rateLimitWindowMs: Number(process.env.RATE_LIMIT_WINDOW_MS || 60_000),
   rateLimitMax: Number(process.env.RATE_LIMIT_MAX || 120),
-  emptyRoomGraceMs: Number(process.env.EMPTY_ROOM_GRACE_MS || 60 * 60 * 1000)
+  emptyRoomGraceMs: Number(process.env.EMPTY_ROOM_GRACE_MS || 60 * 60 * 1000),
+  supportEmailTo: process.env.SUPPORT_EMAIL_TO || "talkitiv01@gmail.com",
+  supportEmailFrom: process.env.SUPPORT_EMAIL_FROM || "",
+  supportSmtpHost: process.env.SUPPORT_SMTP_HOST || "smtp.gmail.com",
+  supportSmtpPort: Number(process.env.SUPPORT_SMTP_PORT || 465),
+  supportSmtpSecure: process.env.SUPPORT_SMTP_SECURE !== "false",
+  supportSmtpUser: process.env.SUPPORT_SMTP_USER || "",
+  supportSmtpPassword: process.env.SUPPORT_SMTP_PASSWORD || ""
 };

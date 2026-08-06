@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { motion } from "framer-motion";
-import { ArrowLeft, FileText, Hand, Hash, Loader2, Lock, Menu, Music, PanelLeftOpen, Pencil, ScreenShare, ScreenShareOff, Settings, Unlock, Video, VideoOff, Wifi, WifiOff, X } from "lucide-react";
+import { ArrowLeft, FileText, Hand, Hash, Loader2, Lock, Menu, Music, PanelLeftOpen, Paperclip, Pencil, ScreenShare, ScreenShareOff, Send, Settings, Unlock, Video, VideoOff, Wifi, WifiOff, X } from "lucide-react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import ChatPanel from "../components/ChatPanel.jsx";
 import BrandMark from "../components/BrandMark.jsx";
@@ -10,7 +10,7 @@ import ShareRoom from "../components/ShareRoom.jsx";
 import StatusPill from "../components/StatusPill.jsx";
 import VideoGrid from "../components/VideoGrid.jsx";
 import Whiteboard from "../components/Whiteboard.jsx";
-import { getMessages, getRoom, uploadRoomFile } from "../lib/api.js";
+import { getMessages, getRoom, submitSupportRequest, uploadRoomFile } from "../lib/api.js";
 import { getGuestClientId, getGuestName, setGuestName } from "../lib/guest.js";
 import { usePageMeta } from "../lib/seo.js";
 import { useSocket } from "../hooks/useSocket.js";
@@ -75,6 +75,12 @@ export default function RoomPage() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsName, setSettingsName] = useState("");
   const [settingsError, setSettingsError] = useState("");
+  const [supportCategory, setSupportCategory] = useState("bug");
+  const [supportMessage, setSupportMessage] = useState("");
+  const [supportScreenshot, setSupportScreenshot] = useState(null);
+  const [supportError, setSupportError] = useState("");
+  const [supportStatus, setSupportStatus] = useState("");
+  const [supportSending, setSupportSending] = useState(false);
   const [whiteboardOpen, setWhiteboardOpen] = useState(false);
   const [joinRequests, setJoinRequests] = useState([]);
   const [joinPanelOpen, setJoinPanelOpen] = useState(false);
@@ -93,6 +99,7 @@ export default function RoomPage() {
   const optimisticUploadUrlsRef = useRef(new Map());
   const chatAudioContextRef = useRef(null);
   const notificationPermissionRequestedRef = useRef(false);
+  const supportScreenshotInputRef = useRef(null);
   const originalTitleRef = useRef(document.title);
   const roomRedirectTimerRef = useRef(null);
 
@@ -760,6 +767,52 @@ export default function RoomPage() {
     });
   }
 
+  function selectSupportScreenshot(event) {
+    const [file] = event.target.files || [];
+    setSupportError("");
+    if (!file) {
+      setSupportScreenshot(null);
+      return;
+    }
+    if (!file.type.startsWith("image/") || !["image/jpeg", "image/png", "image/webp"].includes(file.type)) {
+      setSupportScreenshot(null);
+      setSupportError("Please attach a PNG, JPEG, or WebP screenshot.");
+      event.target.value = "";
+      return;
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      setSupportScreenshot(null);
+      setSupportError("Screenshot must be 5 MB or smaller.");
+      event.target.value = "";
+      return;
+    }
+    setSupportScreenshot(file);
+  }
+
+  async function sendSupportReport(event) {
+    event.preventDefault();
+    const message = supportMessage.trim();
+    setSupportError("");
+    setSupportStatus("");
+    if (message.length < 10) {
+      setSupportError("Please include a little more detail so we can help.");
+      return;
+    }
+
+    setSupportSending(true);
+    try {
+      await submitSupportRequest({ category: supportCategory, message, screenshot: supportScreenshot });
+      setSupportMessage("");
+      setSupportScreenshot(null);
+      if (supportScreenshotInputRef.current) supportScreenshotInputRef.current.value = "";
+      setSupportStatus("Sent. Thank you for helping improve Talkietiv.");
+    } catch (requestError) {
+      setSupportError(requestError.message || "Unable to send your message.");
+    } finally {
+      setSupportSending(false);
+    }
+  }
+
   function kickParticipant(targetId) {
     socket.emit("host:kick", { roomId, targetId });
   }
@@ -1041,6 +1094,8 @@ export default function RoomPage() {
             onClick={() => {
               setSettingsName(self?.username || getGuestName());
               setSettingsError("");
+              setSupportError("");
+              setSupportStatus("");
               setSettingsOpen(true);
             }}
             title="Settings"
@@ -1231,11 +1286,11 @@ export default function RoomPage() {
 
       {settingsOpen && (
         <div className="fixed inset-0 z-50 grid place-items-center bg-black/75 p-4 backdrop-blur-md">
-          <form onSubmit={saveDisplayName} className="apple-surface w-full max-w-sm rounded-xl p-5 shadow-2xl">
+          <div className="apple-surface max-h-[calc(100dvh-2rem)] w-full max-w-md overflow-y-auto rounded-xl p-5 shadow-2xl">
             <div className="mb-4 flex items-center justify-between gap-3">
               <div>
                 <h2 className="text-base font-bold text-slate-100">Settings</h2>
-                <p className="text-xs text-slate-400">Change your display name</p>
+                <p className="text-xs text-slate-400">Profile and support</p>
               </div>
               <button
                 type="button"
@@ -1247,33 +1302,96 @@ export default function RoomPage() {
               </button>
             </div>
 
-            <label className="block text-sm font-semibold text-slate-200" htmlFor="display-name">
-              Display name
-            </label>
-            <input
-              id="display-name"
-              value={settingsName}
-              onChange={(event) => setSettingsName(event.target.value)}
-              maxLength={24}
-              autoFocus
-              className="mt-2 w-full rounded-md border border-line bg-ink/70 px-3 py-2 text-sm text-slate-100 outline-none transition placeholder:text-slate-500 focus:border-mint/70"
-              placeholder="Your name"
-            />
-            {settingsError && <p className="mt-2 text-xs text-amberglow">{settingsError}</p>}
+            <form onSubmit={saveDisplayName}>
+              <label className="block text-sm font-semibold text-slate-200" htmlFor="display-name">
+                Display name
+              </label>
+              <input
+                id="display-name"
+                value={settingsName}
+                onChange={(event) => setSettingsName(event.target.value)}
+                maxLength={24}
+                autoFocus
+                className="mt-2 w-full rounded-md border border-line bg-ink/70 px-3 py-2 text-sm text-slate-100 outline-none transition placeholder:text-slate-500 focus:border-mint/70"
+                placeholder="Your name"
+              />
+              {settingsError && <p className="mt-2 text-xs text-amberglow">{settingsError}</p>}
 
-            <div className="mt-5 flex justify-end gap-2">
-              <button
-                type="button"
-                onClick={() => setSettingsOpen(false)}
-                className="min-h-10 rounded-md border border-line bg-white/[0.04] px-4 text-sm font-medium text-slate-200 hover:bg-white/10"
-              >
-                Cancel
-              </button>
-              <button type="submit" className="min-h-10 rounded-md bg-mint px-4 text-sm font-bold text-ink hover:bg-mint/90">
-                Save
-              </button>
-            </div>
-          </form>
+              <div className="mt-4 flex justify-end gap-2">
+                <button type="submit" className="min-h-10 rounded-md bg-mint px-4 text-sm font-bold text-ink hover:bg-mint/90">
+                  Save name
+                </button>
+              </div>
+            </form>
+
+            <form onSubmit={sendSupportReport} className="mt-5 border-t border-line pt-5">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <h3 className="text-sm font-semibold text-slate-100">Report a bug or contact us</h3>
+                  <p className="mt-1 text-xs leading-5 text-slate-400">Send feedback anonymously to the Talkietiv team.</p>
+                </div>
+                <select
+                  value={supportCategory}
+                  onChange={(event) => setSupportCategory(event.target.value)}
+                  className="h-9 shrink-0 rounded-md border border-line bg-ink/70 px-2 text-xs font-medium text-slate-200 outline-none focus:border-mint/70"
+                  aria-label="Message type"
+                >
+                  <option value="bug">Bug report</option>
+                  <option value="query">Question</option>
+                </select>
+              </div>
+
+              <label className="sr-only" htmlFor="support-message">Message</label>
+              <textarea
+                id="support-message"
+                value={supportMessage}
+                onChange={(event) => setSupportMessage(event.target.value)}
+                maxLength={4000}
+                rows={5}
+                required
+                className="mt-3 w-full resize-y rounded-md border border-line bg-ink/70 px-3 py-2 text-sm text-slate-100 outline-none transition placeholder:text-slate-500 focus:border-mint/70"
+                placeholder="Tell us what happened or how we can help..."
+              />
+
+              <input ref={supportScreenshotInputRef} type="file" accept="image/png,image/jpeg,image/webp" className="hidden" onChange={selectSupportScreenshot} />
+              <div className="mt-3 flex items-center justify-between gap-3">
+                <button
+                  type="button"
+                  onClick={() => supportScreenshotInputRef.current?.click()}
+                  className="inline-flex min-h-9 min-w-0 items-center gap-2 rounded-md border border-line px-3 text-xs font-semibold text-slate-300 hover:bg-white/[0.07]"
+                >
+                  <Paperclip className="h-4 w-4" />
+                  <span className="max-w-44 truncate">{supportScreenshot ? supportScreenshot.name : "Attach screenshot"}</span>
+                </button>
+                {supportScreenshot && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSupportScreenshot(null);
+                      if (supportScreenshotInputRef.current) supportScreenshotInputRef.current.value = "";
+                    }}
+                    className="grid h-9 w-9 shrink-0 place-items-center rounded-md text-slate-400 hover:bg-white/10 hover:text-slate-100"
+                    title="Remove screenshot"
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
+                )}
+              </div>
+              {supportError && <p className="mt-3 text-xs text-amberglow">{supportError}</p>}
+              {supportStatus && <p className="mt-3 text-xs text-mint">{supportStatus}</p>}
+
+              <div className="mt-4 flex justify-end gap-2">
+                <button
+                  type="submit"
+                  disabled={supportSending}
+                  className="inline-flex min-h-10 items-center gap-2 rounded-md bg-mint px-4 text-sm font-bold text-ink hover:bg-mint/90 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {supportSending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+                  Send
+                </button>
+              </div>
+            </form>
+          </div>
         </div>
       )}
 

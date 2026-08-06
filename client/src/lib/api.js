@@ -51,6 +51,18 @@ export async function uploadRoomFile(roomId, file, username, options = {}) {
   return payload;
 }
 
+export async function submitSupportRequest({ category, message, screenshot }) {
+  const body = new FormData();
+  body.append("category", category);
+  body.append("message", message);
+  if (screenshot) body.append("screenshot", screenshot);
+
+  const res = await fetch(`${API_URL}/api/support`, { method: "POST", body });
+  const payload = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(payload.message || "Unable to send your message");
+  return payload;
+}
+
 export function apiAssetUrl(path) {
   if (!path) return "#";
   if (/^(https?:|blob:|data:)/i.test(path)) return path;

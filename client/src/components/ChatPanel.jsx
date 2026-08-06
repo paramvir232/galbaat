@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import DOMPurify from "dompurify";
-import { Check, Download, Edit3, File as FileIcon, Loader2, Mic, Minus, Plus, RotateCcw, Send, Smile, Square, Trash2, UserRound, UsersRound, X } from "lucide-react";
+import { Check, Download, Edit3, Eye, File as FileIcon, Loader2, Mic, Minus, Plus, RotateCcw, Send, Smile, Square, Trash2, UserRound, UsersRound, X } from "lucide-react";
 import { apiAssetUrl } from "../lib/api";
 import { formatTime } from "../lib/time";
 
@@ -24,7 +24,15 @@ function pastedImageName(file) {
 function attachmentKind(file) {
   if (file.mimeType?.startsWith("image/")) return "image";
   if (file.mimeType?.startsWith("audio/")) return "audio";
+  if (file.mimeType?.startsWith("video/")) return "video";
   return "file";
+}
+
+function attachmentPreviewType(file) {
+  if (attachmentKind(file) === "video") return "video";
+  if (file.mimeType === "application/pdf" || /\.pdf$/i.test(file.originalName || "")) return "pdf";
+  if (/^(text\/|application\/(json|xml|javascript))/.test(file.mimeType || "")) return "text";
+  return "document";
 }
 
 function reactionEntries(reactions = {}) {
@@ -175,6 +183,7 @@ export default function ChatPanel({
   const [editingMessage, setEditingMessage] = useState(null);
   const [mention, setMention] = useState(null);
   const [imagePreview, setImagePreview] = useState(null);
+  const [attachmentPreview, setAttachmentPreview] = useState(null);
   const [imageZoom, setImageZoom] = useState(1);
   const [imagePan, setImagePan] = useState({ x: 0, y: 0 });
   const endRef = useRef(null);
@@ -217,6 +226,15 @@ export default function ChatPanel({
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [imagePreview]);
+
+  useEffect(() => {
+    if (!attachmentPreview) return undefined;
+    const onKeyDown = (event) => {
+      if (event.key === "Escape") setAttachmentPreview(null);
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [attachmentPreview]);
 
   useEffect(() => {
     if (imageZoom === 1) setImagePan({ x: 0, y: 0 });
@@ -433,35 +451,63 @@ export default function ChatPanel({
 
   function renderAttachment(file) {
     const kind = attachmentKind(file);
+    const previewUrl = apiAssetUrl(file.previewUrl || file.downloadUrl);
+    const downloadUrl = apiAssetUrl(file.downloadUrl || file.previewUrl);
     if (kind === "image") {
       const previewUrl = apiAssetUrl(file.previewUrl);
       return (
-        <button
-          type="button"
-          onClick={() => setImagePreview({ url: previewUrl, name: file.originalName })}
-          className="mt-2 block w-full overflow-hidden rounded-md border border-line bg-ink/50 text-left hover:border-mint/50"
-        >
-          <img src={previewUrl} alt={file.originalName} className="max-h-72 w-full object-contain" />
-        </button>
+        <div className="mt-2">
+          <button
+            type="button"
+            onClick={() => setImagePreview({ url: previewUrl, name: file.originalName })}
+            className="block w-full overflow-hidden rounded-md border border-line bg-ink/50 text-left hover:border-mint/50"
+          >
+            <img src={previewUrl} alt={file.originalName} className="max-h-72 w-full object-contain" />
+          </button>
+          <div className="mt-1.5 flex justify-end">
+            <a href={downloadUrl} download className="inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-xs text-slate-400 hover:bg-white/10 hover:text-slate-100">
+              <Download className="h-3.5 w-3.5" /> Download
+            </a>
+          </div>
+        </div>
       );
     }
 
     if (kind === "audio") {
       return (
-        <audio controls preload="metadata" src={apiAssetUrl(file.previewUrl)} className="mt-2 w-full" />
+        <div className="mt-2">
+          <audio controls preload="metadata" src={previewUrl} className="w-full" />
+          <div className="mt-1.5 flex justify-end">
+            <a href={downloadUrl} download className="inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-xs text-slate-400 hover:bg-white/10 hover:text-slate-100">
+              <Download className="h-3.5 w-3.5" /> Download
+            </a>
+          </div>
+        </div>
       );
     }
 
     return (
-      <a
-        href={apiAssetUrl(file.downloadUrl)}
-        download
-        className="mt-2 flex items-center gap-2 rounded-md border border-line bg-ink/50 px-3 py-2 text-sm text-slate-200 hover:bg-white/10"
-      >
-        <FileIcon className="h-4 w-4 text-skyglass" />
-        <span className="min-w-0 flex-1 truncate">{file.originalName}</span>
-        <span className="text-xs text-slate-500">{formatBytes(file.size)}</span>
-      </a>
+      <div className="mt-2 flex items-center gap-1.5 rounded-md border border-line bg-ink/50 p-1.5 text-sm text-slate-200">
+        <button
+          type="button"
+          onClick={() => setAttachmentPreview({ url: previewUrl, name: file.originalName, type: attachmentPreviewType(file) })}
+          className="flex min-w-0 flex-1 items-center gap-2 rounded px-1.5 py-1.5 text-left hover:bg-white/10"
+          title={`Open ${file.originalName}`}
+        >
+          <FileIcon className="h-4 w-4 shrink-0 text-skyglass" />
+          <span className="min-w-0 flex-1 truncate">{file.originalName}</span>
+          <span className="shrink-0 text-xs text-slate-500">{formatBytes(file.size)}</span>
+          <Eye className="h-4 w-4 shrink-0 text-slate-400" />
+        </button>
+        <a
+          href={downloadUrl}
+          download
+          title={`Download ${file.originalName}`}
+          className="grid h-8 w-8 shrink-0 place-items-center rounded text-slate-400 hover:bg-white/10 hover:text-slate-100"
+        >
+          <Download className="h-4 w-4" />
+        </a>
+      </div>
     );
   }
 
@@ -923,6 +969,45 @@ export default function ChatPanel({
             >
               <X className="h-5 w-5" />
             </button>
+          </div>
+        </div>
+      )}
+
+      {attachmentPreview && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-ink/95 p-3 backdrop-blur sm:p-6">
+          <div className="relative flex h-full w-full max-w-6xl flex-col overflow-hidden rounded-lg border border-line bg-panel shadow-2xl">
+            <div className="flex shrink-0 items-center gap-3 border-b border-line px-4 py-3">
+              <FileIcon className="h-4 w-4 shrink-0 text-skyglass" />
+              <span className="min-w-0 flex-1 truncate text-sm font-medium text-slate-100">{attachmentPreview.name}</span>
+              <a
+                href={attachmentPreview.url}
+                download
+                title={`Download ${attachmentPreview.name}`}
+                className="grid h-9 w-9 shrink-0 place-items-center rounded-md text-slate-300 hover:bg-white/10 hover:text-slate-100"
+              >
+                <Download className="h-4 w-4" />
+              </a>
+              <button
+                type="button"
+                onClick={() => setAttachmentPreview(null)}
+                title="Close preview"
+                className="grid h-9 w-9 shrink-0 place-items-center rounded-md text-slate-300 hover:bg-white/10 hover:text-slate-100"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+            <div className="min-h-0 flex-1 bg-black/60 p-2 sm:p-4">
+              {attachmentPreview.type === "video" ? (
+                <video controls autoPlay playsInline src={attachmentPreview.url} className="h-full w-full rounded-md bg-black object-contain" />
+              ) : (
+                <iframe
+                  key={attachmentPreview.url}
+                  title={attachmentPreview.name}
+                  src={attachmentPreview.url}
+                  className="h-full w-full rounded-md border border-line bg-white"
+                />
+              )}
+            </div>
           </div>
         </div>
       )}
