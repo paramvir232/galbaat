@@ -38,6 +38,7 @@ export default function RoomPage() {
     ensureMedia,
     connectToPeers,
     syncPeers,
+    syncPeerAudioHealth,
     setTrackEnabled,
     startVideo,
     stopVideo,
@@ -431,7 +432,7 @@ export default function RoomPage() {
         const peers = ack.peers || [];
         syncPeers(peers.map((peer) => peer.id));
         await ensureMedia();
-        await connectToPeers(peers);
+        await connectToPeers(peers, { offer: false });
         if (speakingRef.current) {
           socket.emit("ptt:speaking", { roomId, speaking: true });
         }
@@ -482,7 +483,9 @@ export default function RoomPage() {
         setMuted(Boolean(currentSelf.muted));
         const peers = deduped.filter((user) => user.id !== currentSelf.id);
         syncPeers(peers.map((user) => user.id));
-        connectToPeers(peers).catch(() => setStatus((current) => (current === "connected" ? "voice-limited" : current)));
+        connectToPeers(peers, { offer: false })
+          .then(() => syncPeerAudioHealth(peers))
+          .catch(() => setStatus((current) => (current === "connected" ? "voice-limited" : current)));
       }
     }
     function onJoined(user) {
@@ -499,7 +502,7 @@ export default function RoomPage() {
     }
     function onPeerReady({ id }) {
       if (!id || id === self?.id) return;
-      connectToPeers([{ id }]).catch(() => setStatus((current) => (current === "connected" ? "voice-limited" : current)));
+      connectToPeers([{ id }], { offer: true }).catch(() => setStatus((current) => (current === "connected" ? "voice-limited" : current)));
     }
     function onLeft(user) {
       setMessages((current) => [
@@ -628,7 +631,7 @@ export default function RoomPage() {
       socket.off("room:join-requests", onJoinRequests);
       socket.off("room:join-approved", onJoinApproved);
     };
-  }, [connectToPeers, mobilePanel, navigate, notifyIncomingMessage, playHandRaiseAlert, playJoinAlert, playJoinRequestAlert, room, self?.clientId, self?.id, setVoiceEffect, socket, stopTalking, syncPeers]);
+  }, [connectToPeers, mobilePanel, navigate, notifyIncomingMessage, playHandRaiseAlert, playJoinAlert, playJoinRequestAlert, room, self?.clientId, self?.id, setVoiceEffect, socket, stopTalking, syncPeerAudioHealth, syncPeers]);
 
   useEffect(() => {
     if (mobilePanel === "chat") setUnreadCount(0);

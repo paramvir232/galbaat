@@ -40,6 +40,7 @@ export function useWebRtcRoom(socket, roomId) {
   const [remoteStreams, setRemoteStreams] = useState([]);
   const [autoplayBlocked, setAutoplayBlocked] = useState(false);
   const peersRef = useRef(new Map());
+  const peerOffererRef = useRef(new Map());
   const microphoneSendersRef = useRef(new Map());
   const audioRef = useRef(new Map());
   const volumeRef = useRef(new Map());
@@ -52,6 +53,8 @@ export function useWebRtcRoom(socket, roomId) {
   const pendingOffersRef = useRef(new Map());
   const recoveryTimersRef = useRef(new Map());
   const mediaRecoveryTimersRef = useRef(new Map());
+  const peerAudioHealthTimersRef = useRef(new Map());
+  const peerSpeakingRef = useRef(new Map());
   const peerRecoveryCooldownsRef = useRef(new Map());
   const [tabAudioSharing, setTabAudioSharing] = useState(false);
   const tabAudioTrackRef = useRef(null);
@@ -295,7 +298,7 @@ export function useWebRtcRoom(socket, roomId) {
   }, []);
 
   const removePeer = useCallback(
-    (peerId) => {
+    (peerId, { preserveOfferer = false } = {}) => {
       peersRef.current.get(peerId)?.close();
       const recoveryTimer = recoveryTimersRef.current.get(peerId);
       if (recoveryTimer) window.clearTimeout(recoveryTimer);
@@ -303,8 +306,13 @@ export function useWebRtcRoom(socket, roomId) {
       const mediaRecoveryTimer = mediaRecoveryTimersRef.current.get(peerId);
       if (mediaRecoveryTimer) window.clearTimeout(mediaRecoveryTimer);
       mediaRecoveryTimersRef.current.delete(peerId);
+      const audioHealthTimer = peerAudioHealthTimersRef.current.get(peerId);
+      if (audioHealthTimer) window.clearTimeout(audioHealthTimer);
+      peerAudioHealthTimersRef.current.delete(peerId);
+      peerSpeakingRef.current.delete(peerId);
       peerRecoveryCooldownsRef.current.delete(peerId);
       peersRef.current.delete(peerId);
+      if (!preserveOfferer) peerOffererRef.current.delete(peerId);
       microphoneSendersRef.current.delete(peerId);
       pendingCandidatesRef.current.delete(peerId);
       peerStreamsRef.current.delete(peerId);
@@ -621,6 +629,8 @@ export function useWebRtcRoom(socket, roomId) {
       });
       // Only the peer selected by the room handshake can create the first offer.
       pc.__galbaatCanOffer = Boolean(initiator);
+      pc.__galbaatInitialOfferer = Boolean(initiator);
+      peerOffererRef.current.set(peerId, Boolean(initiator));
 
       const microphoneTrack = outgoingAudioTrackRef.current || stream.getAudioTracks()[0];
       if (microphoneTrack) {
@@ -655,7 +665,7 @@ export function useWebRtcRoom(socket, roomId) {
           recoveryTimersRef.current.delete(peerId);
           if (peersRef.current.get(peerId) !== pc || pc.connectionState === "closed") return;
           if (pc.connectionState === "disconnected" || pc.connectionState === "failed" || pc.iceConnectionState === "disconnected" || pc.iceConnectionState === "failed") {
-            if (socket.id > peerId) {
+            if (peerOffererRef.current.get(peerId)) {
               pc.restartIce?.();
               renegotiatePeer(peerId, pc).catch(() => {});
             } else {
@@ -774,6 +784,8 @@ export function useWebRtcRoom(socket, roomId) {
       const enableInitialOffer = async (pc) => {
         if (!initiator || pc.__galbaatCanOffer) return;
         pc.__galbaatCanOffer = true;
+        pc.__galbaatInitialOfferer = true;
+        peerOffererRef.current.set(peerId, true);
         if (pc.signalingState === "stable" && !pc.localDescription && !pc.remoteDescription) {
           await renegotiatePeer(peerId, pc);
         }
@@ -822,13 +834,14 @@ export function useWebRtcRoom(socket, roomId) {
       const existingTimer = mediaRecoveryTimersRef.current.get(peerId);
       if (existingTimer) window.clearTimeout(existingTimer);
       mediaRecoveryTimersRef.current.delete(peerId);
-      removePeer(peerId);
-      peerRecoveryCooldownsRef.current.set(peerId, now);
 
-      const isOfferer = socket.id > peerId;
+      const isOfferer = peerOffererRef.current.get(peerId) ?? socket.id > peerId;
+      removePeer(peerId, { preserveOfferer: true });
+      peerRecoveryCooldownsRef.current.set(peerId, now);
+      peerOffererRef.current.set(peerId, isOfferer);
       await createPeer(peerId, isOfferer);
       if (!isOfferer) {
-        // The higher socket id deterministically recreates the offer.
+        // Ask the designated initial offerer to recreate this pair.
         socket.emit("webrtc:resync-request", { to: peerId });
       }
     },
@@ -854,13 +867,80 @@ export function useWebRtcRoom(socket, roomId) {
     [recoverPeer]
   );
 
+  const syncPeerAudioHealth = useCallback(
+    (peers) => {
+      const activePeerIds = new Set();
+      peers.forEach((peer) => {
+        if (!peer?.id || peer.id === socket.id) return;
+        activePeerIds.add(peer.id);
+        const isSpeaking = Boolean(peer.speaking);
+        const wasSpeaking = Boolean(peerSpeakingRef.current.get(peer.id));
+        peerSpeakingRef.current.set(peer.id, isSpeaking);
+
+        if (!isSpeaking) {
+          const timer = peerAudioHealthTimersRef.current.get(peer.id);
+          if (timer) window.clearTimeout(timer);
+          peerAudioHealthTimersRef.current.delete(peer.id);
+          return;
+        }
+        if (wasSpeaking || peerAudioHealthTimersRef.current.has(peer.id)) return;
+
+        const pc = peersRef.current.get(peer.id);
+        const receiver = pc?.getReceivers().find((item) => item.track?.kind === "audio");
+        if (!pc || !receiver) {
+          recoverPeer(peer.id).catch(() => {});
+          return;
+        }
+        if (typeof receiver.getStats !== "function") {
+          audioRef.current.get(peer.id)?.forEach((audio) => audio.play().catch(() => setAutoplayBlocked(true)));
+          return;
+        }
+
+        receiver.getStats().then((stats) => {
+          let baselinePackets = 0;
+          stats.forEach((report) => {
+            if (report.type === "inbound-rtp" && (report.kind === "audio" || report.mediaType === "audio")) baselinePackets = Math.max(baselinePackets, report.packetsReceived || 0);
+          });
+          const timer = window.setTimeout(async () => {
+            peerAudioHealthTimersRef.current.delete(peer.id);
+            if (!peerSpeakingRef.current.get(peer.id) || peersRef.current.get(peer.id) !== pc) return;
+            try {
+              const laterStats = await receiver.getStats();
+              let packetsReceived = 0;
+              laterStats.forEach((report) => {
+                if (report.type === "inbound-rtp" && (report.kind === "audio" || report.mediaType === "audio")) packetsReceived = Math.max(packetsReceived, report.packetsReceived || 0);
+              });
+              if (packetsReceived <= baselinePackets) {
+                await recoverPeer(peer.id);
+              } else {
+                audioRef.current.get(peer.id)?.forEach((audio) => audio.play().catch(() => setAutoplayBlocked(true)));
+              }
+            } catch {
+              recoverPeer(peer.id).catch(() => {});
+            }
+          }, 2_500);
+          peerAudioHealthTimersRef.current.set(peer.id, timer);
+        }).catch(() => recoverPeer(peer.id).catch(() => {}));
+      });
+
+      peerSpeakingRef.current.forEach((_speaking, peerId) => {
+        if (activePeerIds.has(peerId)) return;
+        const timer = peerAudioHealthTimersRef.current.get(peerId);
+        if (timer) window.clearTimeout(timer);
+        peerAudioHealthTimersRef.current.delete(peerId);
+        peerSpeakingRef.current.delete(peerId);
+      });
+    },
+    [recoverPeer, socket.id]
+  );
+
   const connectToPeers = useCallback(
-    async (peers) => {
+    async (peers, { offer = false } = {}) => {
       await ensureMedia();
       const connectedPeers = await Promise.all(
         peers
           .filter((peer) => peer?.id && peer.id !== socket.id)
-          .map((peer) => createPeer(peer.id, socket.id > peer.id))
+          .map((peer) => createPeer(peer.id, offer))
       );
       peers
         .filter((peer) => peer?.id && peer.id !== socket.id)
@@ -982,8 +1062,8 @@ export function useWebRtcRoom(socket, roomId) {
     };
 
     const handleResyncRequest = ({ from }) => {
-      // Only the deterministic offerer resets after a peer asks for a retry.
-      if (socket.id > from) recoverPeer(from).catch(() => {});
+      // Only the peer selected to make the initial offer restarts a failed pair.
+      if (peerOffererRef.current.get(from) ?? socket.id > from) recoverPeer(from).catch(() => {});
     };
 
     const handleResyncReset = ({ peerId }) => {
@@ -1038,6 +1118,10 @@ export function useWebRtcRoom(socket, roomId) {
     const negotiating = negotiatingRef.current;
     const negotiationQueue = negotiationQueueRef.current;
     const recoveryTimers = recoveryTimersRef.current;
+    const mediaRecoveryTimers = mediaRecoveryTimersRef.current;
+    const audioHealthTimers = peerAudioHealthTimersRef.current;
+    const peerSpeaking = peerSpeakingRef.current;
+    const peerOfferers = peerOffererRef.current;
     const microphoneSenders = microphoneSendersRef.current;
     return () => {
       peers.forEach((pc) => pc.close());
@@ -1048,6 +1132,12 @@ export function useWebRtcRoom(socket, roomId) {
       negotiationQueue.clear();
       recoveryTimers.forEach((timer) => window.clearTimeout(timer));
       recoveryTimers.clear();
+      mediaRecoveryTimers.forEach((timer) => window.clearTimeout(timer));
+      mediaRecoveryTimers.clear();
+      audioHealthTimers.forEach((timer) => window.clearTimeout(timer));
+      audioHealthTimers.clear();
+      peerSpeaking.clear();
+      peerOfferers.clear();
       localStreamRef.current?.getTracks().forEach((track) => track.stop());
       if (recordingSessionRef.current?.recorder.state !== "inactive") recordingSessionRef.current.recorder.stop();
       localStreamRef.current = null;
@@ -1080,6 +1170,7 @@ export function useWebRtcRoom(socket, roomId) {
     ensureMedia,
     connectToPeers,
     syncPeers,
+    syncPeerAudioHealth,
     setTrackEnabled,
     startVideo,
     stopVideo,
