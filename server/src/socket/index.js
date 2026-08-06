@@ -1069,6 +1069,15 @@ export function registerSocketHandlers(io) {
       });
     });
 
+    socket.on("webrtc:resync-request", ({ to }) => {
+      const roomId = socket.data.roomId;
+      const users = rooms.get(roomId);
+      if (!canSignal(socket) || !users?.has(to)) return;
+      // Reset the requester first so it is ready to answer the replacement offer.
+      socket.emit("webrtc:resync-reset", { peerId: to });
+      io.to(to).emit("webrtc:resync-request", { from: socket.id });
+    });
+
     socket.on("webrtc:video-sync-request", ({ to }) => {
       if (!canSignal(socket)) return;
       io.to(to).emit("webrtc:video-sync-request", { from: socket.id });

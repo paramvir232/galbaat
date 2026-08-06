@@ -51,6 +51,8 @@ export function useWebRtcRoom(socket, roomId) {
   const creatingPeersRef = useRef(new Map());
   const pendingOffersRef = useRef(new Map());
   const recoveryTimersRef = useRef(new Map());
+  const mediaRecoveryTimersRef = useRef(new Map());
+  const peerRecoveryCooldownsRef = useRef(new Map());
   const [tabAudioSharing, setTabAudioSharing] = useState(false);
   const tabAudioTrackRef = useRef(null);
   const tabAudioSendersRef = useRef(new Map());
@@ -298,6 +300,10 @@ export function useWebRtcRoom(socket, roomId) {
       const recoveryTimer = recoveryTimersRef.current.get(peerId);
       if (recoveryTimer) window.clearTimeout(recoveryTimer);
       recoveryTimersRef.current.delete(peerId);
+      const mediaRecoveryTimer = mediaRecoveryTimersRef.current.get(peerId);
+      if (mediaRecoveryTimer) window.clearTimeout(mediaRecoveryTimer);
+      mediaRecoveryTimersRef.current.delete(peerId);
+      peerRecoveryCooldownsRef.current.delete(peerId);
       peersRef.current.delete(peerId);
       microphoneSendersRef.current.delete(peerId);
       pendingCandidatesRef.current.delete(peerId);
@@ -649,8 +655,13 @@ export function useWebRtcRoom(socket, roomId) {
           recoveryTimersRef.current.delete(peerId);
           if (peersRef.current.get(peerId) !== pc || pc.connectionState === "closed") return;
           if (pc.connectionState === "disconnected" || pc.connectionState === "failed" || pc.iceConnectionState === "disconnected" || pc.iceConnectionState === "failed") {
-            pc.restartIce?.();
-            renegotiatePeer(peerId, pc).catch(() => {});
+            if (socket.id > peerId) {
+              pc.restartIce?.();
+              renegotiatePeer(peerId, pc).catch(() => {});
+            } else {
+              // The designated offerer owns ICE restarts, preventing competing offers.
+              socket.emit("webrtc:resync-request", { to: peerId });
+            }
           }
         }, 3000);
         recoveryTimersRef.current.set(peerId, timer);
@@ -691,6 +702,11 @@ export function useWebRtcRoom(socket, roomId) {
           displayStream.addTrack(event.track);
         }
         if (event.track.kind === "audio") addRecordingTrack(event.track);
+        if (event.track.kind === "audio") {
+          const recoveryTimer = mediaRecoveryTimersRef.current.get(peerId);
+          if (recoveryTimer) window.clearTimeout(recoveryTimer);
+          mediaRecoveryTimersRef.current.delete(peerId);
+        }
         peerStreamsRef.current.set(peerId, displayStream);
         displayStream.onremovetrack = refreshRemoteStreamsState;
         event.track.onended = refreshRemoteStreamsState;
@@ -796,16 +812,61 @@ export function useWebRtcRoom(socket, roomId) {
     [createPeerInner, renegotiatePeer]
   );
 
+  const recoverPeer = useCallback(
+    async (peerId) => {
+      if (!peerId || peerId === socket.id) return;
+      const now = Date.now();
+      const lastRecovery = peerRecoveryCooldownsRef.current.get(peerId) || 0;
+      if (now - lastRecovery < 5_000) return;
+
+      const existingTimer = mediaRecoveryTimersRef.current.get(peerId);
+      if (existingTimer) window.clearTimeout(existingTimer);
+      mediaRecoveryTimersRef.current.delete(peerId);
+      removePeer(peerId);
+      peerRecoveryCooldownsRef.current.set(peerId, now);
+
+      const isOfferer = socket.id > peerId;
+      await createPeer(peerId, isOfferer);
+      if (!isOfferer) {
+        // The higher socket id deterministically recreates the offer.
+        socket.emit("webrtc:resync-request", { to: peerId });
+      }
+    },
+    [createPeer, removePeer, socket]
+  );
+
+  const scheduleMediaRecovery = useCallback(
+    (peerId, pc) => {
+      const existingTimer = mediaRecoveryTimersRef.current.get(peerId);
+      if (existingTimer) window.clearTimeout(existingTimer);
+
+      const timer = window.setTimeout(() => {
+        mediaRecoveryTimersRef.current.delete(peerId);
+        if (peersRef.current.get(peerId) !== pc || pc.connectionState === "closed") return;
+        const hasRemoteAudio = peerStreamsRef.current
+          .get(peerId)
+          ?.getAudioTracks()
+          .some((track) => track.readyState === "live");
+        if (!hasRemoteAudio) recoverPeer(peerId).catch(() => {});
+      }, 7_000);
+      mediaRecoveryTimersRef.current.set(peerId, timer);
+    },
+    [recoverPeer]
+  );
+
   const connectToPeers = useCallback(
     async (peers) => {
       await ensureMedia();
-      await Promise.all(
+      const connectedPeers = await Promise.all(
         peers
           .filter((peer) => peer?.id && peer.id !== socket.id)
           .map((peer) => createPeer(peer.id, socket.id > peer.id))
       );
+      peers
+        .filter((peer) => peer?.id && peer.id !== socket.id)
+        .forEach((peer, index) => scheduleMediaRecovery(peer.id, connectedPeers[index]));
     },
-    [createPeer, ensureMedia, socket.id]
+    [createPeer, ensureMedia, scheduleMediaRecovery, socket.id]
   );
 
   const processPendingOffer = useCallback(
@@ -920,11 +981,22 @@ export function useWebRtcRoom(socket, roomId) {
       resyncVideoToPeer(from).catch(() => {});
     };
 
+    const handleResyncRequest = ({ from }) => {
+      // Only the deterministic offerer resets after a peer asks for a retry.
+      if (socket.id > from) recoverPeer(from).catch(() => {});
+    };
+
+    const handleResyncReset = ({ peerId }) => {
+      recoverPeer(peerId).catch(() => {});
+    };
+
     socket.on("webrtc:offer", handleOffer);
     socket.on("webrtc:answer", handleAnswer);
     socket.on("webrtc:ice-candidate", handleIce);
     socket.on("webrtc:peer-left", handlePeerLeft);
     socket.on("webrtc:video-sync-request", handleVideoSyncRequest);
+    socket.on("webrtc:resync-request", handleResyncRequest);
+    socket.on("webrtc:resync-reset", handleResyncReset);
 
     return () => {
       socket.off("webrtc:offer", handleOffer);
@@ -932,8 +1004,10 @@ export function useWebRtcRoom(socket, roomId) {
       socket.off("webrtc:ice-candidate", handleIce);
       socket.off("webrtc:peer-left", handlePeerLeft);
       socket.off("webrtc:video-sync-request", handleVideoSyncRequest);
+      socket.off("webrtc:resync-request", handleResyncRequest);
+      socket.off("webrtc:resync-reset", handleResyncReset);
     };
-  }, [createPeer, processPendingOffer, removePeer, renegotiatePeer, resyncVideoToPeer, socket]);
+  }, [createPeer, processPendingOffer, recoverPeer, removePeer, renegotiatePeer, resyncVideoToPeer, socket]);
 
   const setPeerVolume = useCallback((peerId, volume) => {
     const nextVolume = Math.max(0, Math.min(1, Number(volume)));
