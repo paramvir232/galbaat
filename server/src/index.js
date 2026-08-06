@@ -44,6 +44,7 @@ app.use(
   helmet({
     crossOriginEmbedderPolicy: false,
     crossOriginResourcePolicy: { policy: "cross-origin" },
+    frameguard: false,
     contentSecurityPolicy: false
   })
 );

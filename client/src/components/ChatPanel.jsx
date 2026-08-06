@@ -31,7 +31,7 @@ function attachmentKind(file) {
 function attachmentPreviewType(file) {
   if (attachmentKind(file) === "video") return "video";
   if (file.mimeType === "application/pdf" || /\.pdf$/i.test(file.originalName || "")) return "pdf";
-  if (/^(text\/|application\/(json|xml|javascript))/.test(file.mimeType || "")) return "text";
+  if (/^(text\/|application\/(json|xml|javascript))/.test(file.mimeType || "") || /\.(txt|md|csv|log|json|xml|ya?ml|js|ts|jsx|tsx|css|html?)$/i.test(file.originalName || "")) return "text";
   return "document";
 }
 
@@ -178,6 +178,7 @@ export default function ChatPanel({
   const [value, setValue] = useState("");
   const [showEmojis, setShowEmojis] = useState(false);
   const [reactionPickerId, setReactionPickerId] = useState(null);
+  const [attachmentPreviewContent, setAttachmentPreviewContent] = useState(null);
   const [recording, setRecording] = useState(false);
   const [pendingAttachment, setPendingAttachment] = useState(null);
   const [editingMessage, setEditingMessage] = useState(null);
@@ -234,6 +235,38 @@ export default function ChatPanel({
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
+  }, [attachmentPreview]);
+
+  useEffect(() => {
+    if (!attachmentPreview || (attachmentPreview.type !== "pdf" && attachmentPreview.type !== "text")) {
+      setAttachmentPreviewContent(null);
+      return undefined;
+    }
+
+    const controller = new window.AbortController();
+    let objectUrl = "";
+    setAttachmentPreviewContent({ loading: true, url: "", text: "", error: "" });
+
+    fetch(attachmentPreview.url, { signal: controller.signal })
+      .then(async (response) => {
+        if (!response.ok) throw new Error("Preview could not be loaded");
+        if (attachmentPreview.type === "text") {
+          const text = await response.text();
+          if (!controller.signal.aborted) setAttachmentPreviewContent({ loading: false, url: "", text, error: "" });
+          return;
+        }
+        const blob = await response.blob();
+        objectUrl = window.URL.createObjectURL(blob);
+        if (!controller.signal.aborted) setAttachmentPreviewContent({ loading: false, url: objectUrl, text: "", error: "" });
+      })
+      .catch((error) => {
+        if (!controller.signal.aborted) setAttachmentPreviewContent({ loading: false, url: "", text: "", error: error.message || "Preview could not be loaded" });
+      });
+
+    return () => {
+      controller.abort();
+      if (objectUrl) window.URL.revokeObjectURL(objectUrl);
+    };
   }, [attachmentPreview]);
 
   useEffect(() => {
@@ -999,13 +1032,29 @@ export default function ChatPanel({
             <div className="min-h-0 flex-1 bg-black/60 p-2 sm:p-4">
               {attachmentPreview.type === "video" ? (
                 <video controls autoPlay playsInline src={attachmentPreview.url} className="h-full w-full rounded-md bg-black object-contain" />
+              ) : attachmentPreview.type === "text" ? (
+                attachmentPreviewContent?.loading ? (
+                  <div className="grid h-full place-items-center text-sm text-slate-400"><Loader2 className="h-5 w-5 animate-spin" /></div>
+                ) : attachmentPreviewContent?.error ? (
+                  <div className="grid h-full place-items-center px-6 text-center text-sm text-rose-300">{attachmentPreviewContent.error}</div>
+                ) : (
+                  <pre className="h-full overflow-auto whitespace-pre-wrap break-words rounded-md border border-line bg-white p-4 font-mono text-sm leading-6 text-slate-800">{attachmentPreviewContent?.text || ""}</pre>
+                )
+              ) : attachmentPreview.type === "pdf" ? (
+                attachmentPreviewContent?.loading ? (
+                  <div className="grid h-full place-items-center text-sm text-slate-400"><Loader2 className="h-5 w-5 animate-spin" /></div>
+                ) : attachmentPreviewContent?.error ? (
+                  <div className="grid h-full place-items-center px-6 text-center text-sm text-rose-300">{attachmentPreviewContent.error}</div>
+                ) : (
+                  <iframe
+                    key={attachmentPreviewContent?.url}
+                    title={attachmentPreview.name}
+                    src={attachmentPreviewContent?.url}
+                    className="h-full w-full rounded-md border border-line bg-white"
+                  />
+                )
               ) : (
-                <iframe
-                  key={attachmentPreview.url}
-                  title={attachmentPreview.name}
-                  src={attachmentPreview.url}
-                  className="h-full w-full rounded-md border border-line bg-white"
-                />
+                <div className="grid h-full place-items-center px-6 text-center text-sm text-slate-400">This file type cannot be previewed in the browser. Use the download button to open it.</div>
               )}
             </div>
           </div>
