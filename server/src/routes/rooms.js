@@ -126,11 +126,13 @@ roomsRouter.get("/:roomId/files/:fileId/preview", ensureRoom, async (req, res, n
     if (!file) return res.status(404).json({ message: "File not found" });
     const range = req.headers.range;
 
-    // Uploaded PDFs are previewed in an iframe on the separate frontend origin.
+    // Keep raw file previews safe for fetches and browser viewers on another origin.
     res.removeHeader("X-Frame-Options");
     res.setHeader("Content-Type", file.mimeType || "application/octet-stream");
-    res.setHeader("Content-Disposition", `inline; filename="${encodeURIComponent(file.originalName)}"`);
+    res.setHeader("Content-Disposition", `inline; filename*=UTF-8''${encodeURIComponent(file.originalName)}`);
     res.setHeader("Accept-Ranges", "bytes");
+    res.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
+    res.setHeader("Cache-Control", "private, no-store");
 
     if (range) {
       const [startPart, endPart] = range.replace(/bytes=/, "").split("-");

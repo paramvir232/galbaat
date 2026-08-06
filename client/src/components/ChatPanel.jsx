@@ -4,6 +4,18 @@ import { Check, Download, Edit3, Eye, File as FileIcon, Loader2, Mic, Minus, Plu
 import { apiAssetUrl } from "../lib/api";
 import { formatTime } from "../lib/time";
 
+let pdfJsPromise;
+
+function loadPdfJs() {
+  if (!pdfJsPromise) {
+    pdfJsPromise = Promise.all([import("pdfjs-dist"), import("pdfjs-dist/build/pdf.worker.min.mjs?url")]).then(([pdfJs, worker]) => {
+      pdfJs.GlobalWorkerOptions.workerSrc = worker.default;
+      return pdfJs;
+    });
+  }
+  return pdfJsPromise;
+}
+
 const EMOJIS = ["😀", "😂", "🔥", "🙌", "👋", "✅", "🎧", "🚀", "❤️"];
 const REACTIONS = ["👍", "😂", "❤️", "🔥", "✅"];
 
@@ -33,6 +45,96 @@ function attachmentPreviewType(file) {
   if (file.mimeType === "application/pdf" || /\.pdf$/i.test(file.originalName || "")) return "pdf";
   if (/^(text\/|application\/(json|xml|javascript))/.test(file.mimeType || "") || /\.(txt|md|csv|log|json|xml|ya?ml|js|ts|jsx|tsx|css|html?)$/i.test(file.originalName || "")) return "text";
   return "document";
+}
+
+function PdfPreview({ url, name }) {
+  const canvasRef = useRef(null);
+  const [pdf, setPdf] = useState(null);
+  const [pageNumber, setPageNumber] = useState(1);
+  const [error, setError] = useState("");
+  const [rendering, setRendering] = useState(true);
+
+  useEffect(() => {
+    if (!url) return undefined;
+    let cancelled = false;
+    let loadingTask;
+    setPdf(null);
+    setPageNumber(1);
+    setError("");
+    setRendering(true);
+
+    loadPdfJs()
+      .then(({ getDocument }) => {
+        if (cancelled) return null;
+        loadingTask = getDocument({ url });
+        return loadingTask.promise;
+      })
+      .then((document) => {
+        if (!document) return;
+        if (!cancelled) setPdf(document);
+      })
+      .catch(() => {
+        if (!cancelled) setError("This PDF could not be rendered in the preview.");
+      });
+
+    return () => {
+      cancelled = true;
+      loadingTask?.destroy();
+    };
+  }, [url]);
+
+  useEffect(() => {
+    if (!pdf || !canvasRef.current) return undefined;
+    let cancelled = false;
+    let renderTask;
+    setRendering(true);
+
+    pdf.getPage(pageNumber)
+      .then((page) => {
+        if (cancelled || !canvasRef.current) return;
+        const viewport = page.getViewport({ scale: 1.5 });
+        const canvas = canvasRef.current;
+        const context = canvas.getContext("2d", { alpha: false });
+        canvas.width = Math.ceil(viewport.width);
+        canvas.height = Math.ceil(viewport.height);
+        renderTask = page.render({ canvasContext: context, viewport });
+        return renderTask.promise;
+      })
+      .then(() => {
+        if (!cancelled) setRendering(false);
+      })
+      .catch((renderError) => {
+        if (!cancelled && renderError?.name !== "RenderingCancelledException") {
+          setError("This PDF could not be rendered in the preview.");
+          setRendering(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+      renderTask?.cancel();
+    };
+  }, [pageNumber, pdf]);
+
+  if (error) return <div className="grid h-full place-items-center px-6 text-center text-sm text-rose-300">{error}</div>;
+
+  return (
+    <div className="relative flex h-full min-h-0 flex-col rounded-md bg-slate-200">
+      <div className="flex shrink-0 items-center justify-center gap-3 border-b border-slate-300 bg-white px-3 py-2 text-xs font-medium text-slate-700">
+        <button type="button" onClick={() => setPageNumber((current) => Math.max(1, current - 1))} disabled={!pdf || pageNumber === 1} className="grid h-8 w-8 place-items-center rounded border border-slate-200 disabled:opacity-40" title="Previous page">
+          <Minus className="h-3.5 w-3.5" />
+        </button>
+        <span>{pdf ? `Page ${pageNumber} of ${pdf.numPages}` : `Loading ${name}`}</span>
+        <button type="button" onClick={() => setPageNumber((current) => Math.min(pdf?.numPages || current, current + 1))} disabled={!pdf || pageNumber >= pdf.numPages} className="grid h-8 w-8 place-items-center rounded border border-slate-200 disabled:opacity-40" title="Next page">
+          <Plus className="h-3.5 w-3.5" />
+        </button>
+      </div>
+      <div className="min-h-0 flex-1 overflow-auto p-4">
+        {rendering && <div className="absolute inset-0 grid place-items-center bg-white/65 text-slate-500"><Loader2 className="h-5 w-5 animate-spin" /></div>}
+        <canvas ref={canvasRef} className="mx-auto block max-w-full rounded-sm bg-white shadow-sm" aria-label={`${name}, page ${pageNumber}`} />
+      </div>
+    </div>
+  );
 }
 
 function reactionEntries(reactions = {}) {
@@ -1046,12 +1148,7 @@ export default function ChatPanel({
                 ) : attachmentPreviewContent?.error ? (
                   <div className="grid h-full place-items-center px-6 text-center text-sm text-rose-300">{attachmentPreviewContent.error}</div>
                 ) : (
-                  <iframe
-                    key={attachmentPreviewContent?.url}
-                    title={attachmentPreview.name}
-                    src={attachmentPreviewContent?.url}
-                    className="h-full w-full rounded-md border border-line bg-white"
-                  />
+                  <PdfPreview url={attachmentPreviewContent?.url} name={attachmentPreview.name} />
                 )
               ) : (
                 <div className="grid h-full place-items-center px-6 text-center text-sm text-slate-400">This file type cannot be previewed in the browser. Use the download button to open it.</div>
