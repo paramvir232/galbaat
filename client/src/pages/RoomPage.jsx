@@ -483,9 +483,9 @@ export default function RoomPage() {
         setMuted(Boolean(currentSelf.muted));
         const peers = deduped.filter((user) => user.id !== currentSelf.id);
         syncPeers(peers.map((user) => user.id));
-        connectToPeers(peers, { offer: false })
-          .then(() => syncPeerAudioHealth(peers))
-          .catch(() => setStatus((current) => (current === "connected" ? "voice-limited" : current)));
+        // This event also fires for every push-to-talk state change. Establish
+        // peers only during room join or an explicit peer-ready signal.
+        syncPeerAudioHealth(peers);
       }
     }
     function onJoined(user) {
@@ -499,10 +499,6 @@ export default function RoomPage() {
         }
       ]);
       playJoinAlert();
-    }
-    function onPeerReady({ id }) {
-      if (!id || id === self?.id) return;
-      connectToPeers([{ id }], { offer: true }).catch(() => setStatus((current) => (current === "connected" ? "voice-limited" : current)));
     }
     function onLeft(user) {
       setMessages((current) => [
@@ -593,7 +589,6 @@ export default function RoomPage() {
     socket.on("disconnect", onDisconnect);
     socket.on("participants:update", onParticipantsUpdate);
     socket.on("participant:joined", onJoined);
-    socket.on("webrtc:peer-ready", onPeerReady);
     socket.on("participant:left", onLeft);
     socket.on("chat:message", onChat);
     socket.on("chat:reaction", onReaction);
@@ -615,7 +610,6 @@ export default function RoomPage() {
       socket.off("disconnect", onDisconnect);
       socket.off("participants:update", onParticipantsUpdate);
       socket.off("participant:joined", onJoined);
-      socket.off("webrtc:peer-ready", onPeerReady);
       socket.off("participant:left", onLeft);
       socket.off("chat:message", onChat);
       socket.off("chat:reaction", onReaction);
@@ -631,7 +625,21 @@ export default function RoomPage() {
       socket.off("room:join-requests", onJoinRequests);
       socket.off("room:join-approved", onJoinApproved);
     };
-  }, [connectToPeers, mobilePanel, navigate, notifyIncomingMessage, playHandRaiseAlert, playJoinAlert, playJoinRequestAlert, room, self?.clientId, self?.id, setVoiceEffect, socket, stopTalking, syncPeerAudioHealth, syncPeers]);
+  }, [mobilePanel, navigate, notifyIncomingMessage, playHandRaiseAlert, playJoinAlert, playJoinRequestAlert, room, self?.clientId, self?.id, setVoiceEffect, socket, stopTalking, syncPeerAudioHealth, syncPeers]);
+
+  useEffect(() => {
+    function onPeerReady({ id }) {
+      if (!id || id === socket.id) return;
+      // Existing participants make the first offer to a newly joined user.
+      // This is the only offer-side creation path for normal room joins.
+      connectToPeers([{ id }], { offer: true }).catch(() => {
+        setStatus((current) => (current === "connected" ? "voice-limited" : current));
+      });
+    }
+
+    socket.on("webrtc:peer-ready", onPeerReady);
+    return () => socket.off("webrtc:peer-ready", onPeerReady);
+  }, [connectToPeers, socket]);
 
   useEffect(() => {
     if (mobilePanel === "chat") setUnreadCount(0);
