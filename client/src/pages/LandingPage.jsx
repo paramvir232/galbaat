@@ -7,11 +7,22 @@ import { getGuestName, setGuestName } from "../lib/guest";
 import { FAQ_ITEMS, HOME_META, SEO_PAGES, usePageMeta } from "../lib/seo.js";
 import BrandMark from "../components/BrandMark.jsx";
 
+function takeRoomNotice() {
+  try {
+    const notice = window.sessionStorage.getItem("talkietiv:room-notice") || "";
+    window.sessionStorage.removeItem("talkietiv:room-notice");
+    return notice;
+  } catch {
+    return "";
+  }
+}
+
 export default function LandingPage() {
   const [roomName, setRoomName] = useState("");
   const [joinCode, setJoinCode] = useState("");
   const [username, setUsername] = useState(getGuestName());
   const [error, setError] = useState("");
+  const [roomNotice] = useState(takeRoomNotice);
   const [busy, setBusy] = useState(false);
   const [openFaq, setOpenFaq] = useState(0);
   const navigate = useNavigate();
@@ -53,6 +64,7 @@ export default function LandingPage() {
 
         <section className="grid flex-1 items-center gap-8 py-10 sm:py-14 lg:grid-cols-[1.08fr_0.92fr]">
           <motion.div initial={{ opacity: 0, y: 18 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5 }}>
+            {roomNotice && <p role="alert" className="mb-5 rounded-md border border-amberglow/40 bg-amberglow/10 px-4 py-3 text-sm font-medium text-amberglow">{roomNotice}</p>}
             <div className="apple-control mb-5 inline-flex max-w-full items-center gap-2 rounded-full px-3 py-2 text-xs text-slate-300 sm:mb-6 sm:px-4 sm:text-sm">
               <Sparkles className="h-4 w-4 text-amberglow" />
               <span className="min-w-0 truncate">Voice • Chat • Screen Share • Whiteboard • Camera • Music</span>

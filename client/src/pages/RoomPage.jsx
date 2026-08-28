@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { motion } from "framer-motion";
 import { ArrowLeft, Circle, CircleHelp, Download, FileText, Hand, Hash, Loader2, Lock, Menu, Music, PanelLeftOpen, Paperclip, Pencil, ScreenShare, ScreenShareOff, Send, Settings, Square, Trash2, Unlock, Video, VideoOff, Wifi, WifiOff, X } from "lucide-react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { useNavigate, useParams } from "react-router-dom";
 import ChatPanel from "../components/ChatPanel.jsx";
 import BrandMark from "../components/BrandMark.jsx";
 import ParticipantList from "../components/ParticipantList.jsx";
@@ -114,19 +114,20 @@ export default function RoomPage() {
   const notificationPermissionRequestedRef = useRef(false);
   const supportScreenshotInputRef = useRef(null);
   const originalTitleRef = useRef(document.title);
-  const roomRedirectTimerRef = useRef(null);
+
+  const redirectHomeWithRoomNotice = useCallback((message) => {
+    joinedRef.current = false;
+    try {
+      window.sessionStorage.setItem("talkietiv:room-notice", message);
+    } catch {
+      // A blocked storage API should not prevent leaving a missing room.
+    }
+    window.location.replace("/");
+  }, []);
 
   const redirectExpiredRoom = useCallback(() => {
-    joinedRef.current = false;
-    setStatus("expired");
-    setError("This room has expired or is no longer available.");
-    window.clearTimeout(roomRedirectTimerRef.current);
-    roomRedirectTimerRef.current = window.setTimeout(() => navigate("/"), 1800);
-  }, [navigate]);
-
-  useEffect(() => {
-    return () => window.clearTimeout(roomRedirectTimerRef.current);
-  }, []);
+    redirectHomeWithRoomNotice("This room does not exist or has expired.");
+  }, [redirectHomeWithRoomNotice]);
 
   const getMaxChatWidth = useCallback(() => {
     if (typeof window === "undefined") return MAX_CHAT_WIDTH;
@@ -397,11 +398,15 @@ export default function RoomPage() {
         setMessages(history);
       } catch (err) {
         joinedRef.current = false;
-        navigate("/", { replace: true, state: { roomError: /room not found/i.test(err.message || "") ? "This room has expired or is no longer available." : "Unable to open this room." } });
+        if (/room not found|not found|expired|404/i.test(err.message || "")) {
+          redirectHomeWithRoomNotice("This room does not exist or has expired.");
+          return;
+        }
+        setError("Unable to open this room. Please try again.");
       }
     }
     loadRoom();
-  }, [navigate, roomId]);
+  }, [redirectHomeWithRoomNotice, roomId]);
 
   useEffect(() => {
     if (!room || !connected || joinedRef.current) return undefined;
@@ -763,6 +768,12 @@ export default function RoomPage() {
     });
   }
 
+  function leaveRoom() {
+    socket.emit("room:leave", { roomId });
+    socket.disconnect();
+    window.location.replace("/");
+  }
+
   function hostMute(targetId, muted) {
     socket.emit("host:mute", { roomId, targetId, muted });
   }
@@ -1097,9 +1108,9 @@ export default function RoomPage() {
     <main className="flex h-dvh min-h-0 flex-col overflow-hidden bg-black p-2 text-slate-100 sm:p-4">
       <header className="apple-surface relative z-40 mb-2 flex shrink-0 flex-col gap-2 rounded-xl px-3 py-3 sm:mb-3 sm:flex-row sm:items-center sm:justify-between sm:gap-3 sm:px-4 sm:py-3">
         <div className="flex w-full min-w-0 flex-1 items-center gap-2 sm:w-auto sm:gap-3">
-          <Link to="/" className="apple-control grid h-11 w-11 shrink-0 place-items-center rounded-md text-slate-300 sm:h-10 sm:w-10">
+          <button type="button" onClick={leaveRoom} title="Leave room" className="apple-control grid h-11 w-11 shrink-0 place-items-center rounded-md text-slate-300 sm:h-10 sm:w-10">
             <ArrowLeft className="h-4 w-4" />
-          </Link>
+          </button>
           <BrandMark className="w-[110px] sm:w-[170px] h-auto -translate-y-[3px] sm:-translate-y-[5px]" />
           <div className="min-w-0">
             <div className="flex items-center gap-2">
@@ -1271,9 +1282,9 @@ export default function RoomPage() {
               <Loader2 className="h-4 w-4 animate-spin text-mint" />
               Waiting for admin permission
             </div>
-            <Link to="/" className="mt-5 inline-flex min-h-10 items-center justify-center rounded-md border border-line bg-white/[0.04] px-4 text-sm font-semibold text-slate-200 hover:bg-white/10">
+            <button type="button" onClick={leaveRoom} className="mt-5 inline-flex min-h-10 items-center justify-center rounded-md border border-line bg-white/[0.04] px-4 text-sm font-semibold text-slate-200 hover:bg-white/10">
               Leave room
-            </Link>
+            </button>
           </div>
         </section>
       ) : (
