@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { motion } from "framer-motion";
-import { ArrowLeft, Circle, Download, FileText, Hand, Hash, Loader2, Lock, Menu, Music, PanelLeftOpen, Paperclip, Pencil, ScreenShare, ScreenShareOff, Send, Settings, Square, Trash2, Unlock, Video, VideoOff, Wifi, WifiOff, X } from "lucide-react";
+import { ArrowLeft, Circle, CircleHelp, Download, FileText, Hand, Hash, Loader2, Lock, Menu, Music, PanelLeftOpen, Paperclip, Pencil, ScreenShare, ScreenShareOff, Send, Settings, Square, Trash2, Unlock, Video, VideoOff, Wifi, WifiOff, X } from "lucide-react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import ChatPanel from "../components/ChatPanel.jsx";
 import BrandMark from "../components/BrandMark.jsx";
@@ -98,6 +98,7 @@ export default function RoomPage() {
   const [recordingNotice, setRecordingNotice] = useState({ active: false, username: "", startedAt: null });
   const [recordingPreview, setRecordingPreview] = useState(null);
   const [recordingElapsed, setRecordingElapsed] = useState(0);
+  const [audioTipsOpen, setAudioTipsOpen] = useState(false);
   const speakingRef = useRef(false);
   const micLockedRef = useRef(false);
   const boardMuteRestoreLockRef = useRef(false);
@@ -1107,6 +1108,42 @@ export default function RoomPage() {
             </div>
             <p className="text-xs text-slate-400">Room code {roomId}</p>
           </div>
+        </div>
+
+        <div className="relative z-50 flex w-full justify-center sm:absolute sm:left-1/2 sm:top-1/2 sm:w-auto sm:-translate-x-1/2 sm:-translate-y-1/2">
+          <button
+            type="button"
+            onClick={() => setAudioTipsOpen((open) => !open)}
+            aria-expanded={audioTipsOpen}
+            aria-haspopup="dialog"
+            title="Audio troubleshooting tips"
+            className="apple-control inline-flex min-h-10 items-center gap-2 rounded-full px-3 text-xs font-bold text-slate-200 transition hover:text-white"
+          >
+            <CircleHelp className="h-4 w-4 text-amberglow" />
+            Audio tips
+          </button>
+          {audioTipsOpen && (
+            <section className="apple-surface absolute left-1/2 top-12 w-[min(22rem,calc(100vw-2rem))] -translate-x-1/2 rounded-xl p-4 text-left shadow-2xl" role="dialog" aria-label="Audio troubleshooting tips">
+              <div className="mb-3 flex items-start justify-between gap-3">
+                <div>
+                  <p className="text-sm font-black text-white">Having audio trouble?</p>
+                  <p className="mt-0.5 text-xs text-slate-400">Try these quick connection fixes.</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setAudioTipsOpen(false)}
+                  title="Close audio tips"
+                  className="grid h-8 w-8 shrink-0 place-items-center rounded-md text-slate-400 transition hover:bg-white/10 hover:text-white"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+              <ol className="space-y-3 text-xs leading-5 text-slate-300">
+                <li className="flex gap-2"><span className="grid h-5 w-5 shrink-0 place-items-center rounded-full bg-amberglow/15 text-[10px] font-black text-amberglow">1</span><span>Try to unlock and lock your mic again. If it is already locked, press the Space bar again.</span></li>
+                <li className="flex gap-2"><span className="grid h-5 w-5 shrink-0 place-items-center rounded-full bg-amberglow/15 text-[10px] font-black text-amberglow">2</span><span>Refresh the page to reconnect you to the room.</span></li>
+              </ol>
+            </section>
+          )}
         </div>
 
         <div className="flex w-full flex-wrap items-center justify-between gap-1.5 sm:w-auto sm:justify-end sm:gap-2">
