@@ -310,6 +310,7 @@ async function leaveCurrentRoom(io, socket) {
   const user = users.get(socket.id);
   if (!user) {
     socket.data.roomId = null;
+    socket.data.webrtcReady = false;
     socket.leave(currentRoomId);
     return;
   }
@@ -326,6 +327,7 @@ async function leaveCurrentRoom(io, socket) {
   if (nextHost) emitJoinRequests(io, currentRoomId);
   emitBoardEditRequests(io, currentRoomId);
   socket.leave(currentRoomId);
+  socket.data.webrtcReady = false;
 
   socket.to(currentRoomId).emit("participant:left", {
     id: socket.id,
@@ -359,6 +361,7 @@ function removeDuplicateClientFromRoom(io, roomId, clientId, nextSocketId) {
   const oldSocket = io.sockets.sockets.get(duplicate.id);
   if (oldSocket) {
     oldSocket.data.roomId = null;
+    oldSocket.data.webrtcReady = false;
     oldSocket.leave(roomId);
     oldSocket.disconnect(true);
   }
@@ -460,6 +463,7 @@ export function registerSocketHandlers(io) {
         socket.data.username = user.username;
         socket.data.pendingRoomId = null;
         socket.data.pendingUsername = null;
+        socket.data.webrtcReady = false;
         socket.join(normalizedRoomId);
         users.set(socket.id, user);
         roomJoinRequests(normalizedRoomId).delete(socket.id);
@@ -470,8 +474,6 @@ export function registerSocketHandlers(io) {
           .map(publicUser);
 
         ack?.({ ok: true, user: publicUser(user), room, peers: existingPeers, features: getRoomFeatures(normalizedRoomId), recording: getRoomRecording(normalizedRoomId) });
-        // Existing members own the first offer, preventing first-join offer collisions.
-        socket.to(normalizedRoomId).emit("webrtc:peer-ready", { id: socket.id });
         if (!replacedUser) socket.to(normalizedRoomId).emit("participant:joined", publicUser(user));
         emitParticipants(io, normalizedRoomId);
         await touchRoom(normalizedRoomId, users.size);
@@ -1043,6 +1045,15 @@ export function registerSocketHandlers(io) {
       if (!userMap?.has(socket.id)) return;
       cancelEmptyRoomCleanup(normalizedRoomId);
       touchRoom(normalizedRoomId, userMap.size).catch(() => {});
+    });
+
+    socket.on("webrtc:ready", () => {
+      const roomId = socket.data.roomId;
+      if (!canSignal(socket) || socket.data.webrtcReady) return;
+      socket.data.webrtcReady = true;
+      // Existing members own the first offer after the joiner has completed
+      // microphone setup and has an answer-side peer ready for every member.
+      socket.to(roomId).emit("webrtc:peer-ready", { id: socket.id });
     });
 
     socket.on("webrtc:offer", ({ to, description }) => {

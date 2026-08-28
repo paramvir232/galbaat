@@ -57,6 +57,7 @@ export function useWebRtcRoom(socket, roomId) {
   const volumeRef = useRef(new Map());
   const peerStreamsRef = useRef(new Map());
   const localStreamRef = useRef(null);
+  const mediaRequestRef = useRef(null);
   const pendingCandidatesRef = useRef(new Map());
   const signalQueuesRef = useRef(new Map());
   const negotiatingRef = useRef(new Set());
@@ -91,26 +92,40 @@ export function useWebRtcRoom(socket, roomId) {
 
   const ensureMedia = useCallback(async () => {
     if (localStreamRef.current) return localStreamRef.current;
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({
+    if (mediaRequestRef.current) return mediaRequestRef.current;
+
+    const request = navigator.mediaDevices
+      .getUserMedia({
         audio: {
           echoCancellation: true,
           noiseSuppression: true,
           autoGainControl: true
         },
         video: false
+      })
+      .then((stream) => {
+        stream.getAudioTracks().forEach((track) => {
+          track.enabled = false;
+        });
+        microphoneTrackRef.current = stream.getAudioTracks()[0] || null;
+        outgoingAudioTrackRef.current = microphoneTrackRef.current;
+        localStreamRef.current = stream;
+        setLocalStream(stream);
+        return stream;
+      })
+      .catch((error) => {
+        setMediaError("Microphone permission is required for voice.");
+        throw error;
+      })
+      .finally(() => {
+        mediaRequestRef.current = null;
       });
-      stream.getAudioTracks().forEach((track) => {
-        track.enabled = false;
-      });
-      microphoneTrackRef.current = stream.getAudioTracks()[0] || null;
-      outgoingAudioTrackRef.current = microphoneTrackRef.current;
-      localStreamRef.current = stream;
-      setLocalStream(stream);
-      return stream;
-    } catch (error) {
-      setMediaError("Microphone permission is required for voice.");
-      throw error;
+
+    mediaRequestRef.current = request;
+    try {
+      return await request;
+    } finally {
+      if (mediaRequestRef.current === request) mediaRequestRef.current = null;
     }
   }, []);
 
@@ -1114,6 +1129,7 @@ export function useWebRtcRoom(socket, roomId) {
       localStreamRef.current?.getTracks().forEach((track) => track.stop());
       if (recordingSessionRef.current?.recorder.state !== "inactive") recordingSessionRef.current.recorder.stop();
       localStreamRef.current = null;
+      mediaRequestRef.current = null;
       peerStreams.clear();
       audios.forEach((peerAudios) => {
         peerAudios.forEach((audio) => {

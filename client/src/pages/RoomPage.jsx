@@ -433,6 +433,9 @@ export default function RoomPage() {
         syncPeers(peers.map((peer) => peer.id));
         await ensureMedia();
         await connectToPeers(peers, { offer: false });
+        // Match the stream-ready handshake: existing members create offers only
+        // after this participant has one stable microphone stream and answer peers.
+        socket.emit("webrtc:ready");
         if (speakingRef.current) {
           socket.emit("ptt:speaking", { roomId, speaking: true });
         }
