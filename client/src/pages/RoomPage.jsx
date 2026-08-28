@@ -392,12 +392,12 @@ export default function RoomPage() {
           getRoom(roomId),
           getMessages(roomId)
         ]);
+        if (!loadedRoom) throw new Error("Room not found");
         setRoom(loadedRoom);
         setMessages(history);
       } catch (err) {
-        const isUnavailable = /room not found/i.test(err.message || "");
-        setError(isUnavailable ? "This room has expired or is no longer available." : err.message);
-        window.setTimeout(() => navigate("/"), 1400);
+        joinedRef.current = false;
+        navigate("/", { replace: true, state: { roomError: /room not found/i.test(err.message || "") ? "This room has expired or is no longer available." : "Unable to open this room." } });
       }
     }
     loadRoom();

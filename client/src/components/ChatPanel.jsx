@@ -405,6 +405,26 @@ export default function ChatPanel({
     });
   }
 
+  async function downloadAttachment(url, filename) {
+    if (!url || url === "#") return;
+    try {
+      const response = await fetch(url, { credentials: "omit" });
+      if (!response.ok) throw new Error("Download failed");
+      const blob = await response.blob();
+      const objectUrl = window.URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = objectUrl;
+      link.download = filename || "talkietiv-download";
+      link.style.display = "none";
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.setTimeout(() => window.URL.revokeObjectURL(objectUrl), 1_000);
+    } catch {
+      // Keep the active room intact even when the file service is temporarily unavailable.
+    }
+  }
+
   function handleChange(event) {
     const nextValue = event.target.value;
     setValue(nextValue);
@@ -603,9 +623,9 @@ export default function ChatPanel({
             <img src={previewUrl} alt={file.originalName} className="max-h-72 w-full object-contain" />
           </button>
           <div className="mt-1.5 flex justify-end">
-            <a href={downloadUrl} download className="inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-xs text-slate-400 hover:bg-white/10 hover:text-slate-100">
+            <button type="button" onClick={() => downloadAttachment(downloadUrl, file.originalName)} className="inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-xs text-slate-400 hover:bg-white/10 hover:text-slate-100">
               <Download className="h-3.5 w-3.5" /> Download
-            </a>
+            </button>
           </div>
         </div>
       );
@@ -616,9 +636,9 @@ export default function ChatPanel({
         <div className="mt-2">
           <audio controls preload="metadata" src={previewUrl} className="w-full" />
           <div className="mt-1.5 flex justify-end">
-            <a href={downloadUrl} download className="inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-xs text-slate-400 hover:bg-white/10 hover:text-slate-100">
+            <button type="button" onClick={() => downloadAttachment(downloadUrl, file.originalName)} className="inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-xs text-slate-400 hover:bg-white/10 hover:text-slate-100">
               <Download className="h-3.5 w-3.5" /> Download
-            </a>
+            </button>
           </div>
         </div>
       );
@@ -637,14 +657,14 @@ export default function ChatPanel({
           <span className="shrink-0 text-xs text-slate-500">{formatBytes(file.size)}</span>
           <Eye className="h-4 w-4 shrink-0 text-slate-400" />
         </button>
-        <a
-          href={downloadUrl}
-          download
+        <button
+          type="button"
+          onClick={() => downloadAttachment(downloadUrl, file.originalName)}
           title={`Download ${file.originalName}`}
           className="grid h-8 w-8 shrink-0 place-items-center rounded text-slate-400 hover:bg-white/10 hover:text-slate-100"
         >
           <Download className="h-4 w-4" />
-        </a>
+        </button>
       </div>
     );
   }
@@ -1117,14 +1137,14 @@ export default function ChatPanel({
             <div className="flex shrink-0 items-center gap-3 border-b border-line px-4 py-3">
               <FileIcon className="h-4 w-4 shrink-0 text-skyglass" />
               <span className="min-w-0 flex-1 truncate text-sm font-medium text-slate-100">{attachmentPreview.name}</span>
-              <a
-                href={attachmentPreview.url}
-                download
+              <button
+                type="button"
+                onClick={() => downloadAttachment(attachmentPreview.url, attachmentPreview.name)}
                 title={`Download ${attachmentPreview.name}`}
                 className="grid h-9 w-9 shrink-0 place-items-center rounded-md text-slate-300 hover:bg-white/10 hover:text-slate-100"
               >
                 <Download className="h-4 w-4" />
-              </a>
+              </button>
               <button
                 type="button"
                 onClick={() => setAttachmentPreview(null)}
