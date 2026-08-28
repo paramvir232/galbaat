@@ -78,8 +78,6 @@ export function useWebRtcRoom(socket, roomId) {
   const outgoingAudioTrackRef = useRef(null);
   const voiceContextRef = useRef(null);
   const voiceInputRef = useRef(null);
-  const voiceGateRef = useRef(null);
-  const audioGateOpenRef = useRef(false);
   const voiceDestinationRef = useRef(null);
   const voiceNodesRef = useRef([]);
   const [voiceEffect, setVoiceEffectState] = useState("none");
@@ -88,18 +86,7 @@ export function useWebRtcRoom(socket, roomId) {
 
   const setTrackEnabled = useCallback((enabled) => {
     setAudioEnabled(enabled);
-    audioGateOpenRef.current = Boolean(enabled);
     const microphoneTrack = microphoneTrackRef.current || localStreamRef.current?.getAudioTracks()[0];
-    const context = voiceContextRef.current;
-    const gate = voiceGateRef.current;
-    if (microphoneTrack && gate && context) {
-      microphoneTrack.enabled = true;
-      const now = context.currentTime;
-      gate.gain.cancelScheduledValues(now);
-      gate.gain.setTargetAtTime(enabled ? 1 : 0, now, 0.008);
-      if (enabled) context.resume().catch(() => {});
-      return;
-    }
     if (microphoneTrack) microphoneTrack.enabled = enabled;
   }, []);
 
@@ -117,30 +104,11 @@ export function useWebRtcRoom(socket, roomId) {
         video: false
       })
       .then((stream) => {
+        stream.getAudioTracks().forEach((track) => {
+          track.enabled = false;
+        });
         microphoneTrackRef.current = stream.getAudioTracks()[0] || null;
-        const AudioContext = window.AudioContext || window.webkitAudioContext;
-        if (AudioContext && microphoneTrackRef.current) {
-          const context = new AudioContext({ latencyHint: "interactive" });
-          const source = context.createMediaStreamSource(stream);
-          const input = context.createGain();
-          const gate = context.createGain();
-          const destination = context.createMediaStreamDestination();
-          gate.gain.value = 0;
-          source.connect(input);
-          input.connect(gate);
-          gate.connect(destination);
-          voiceContextRef.current = context;
-          voiceInputRef.current = input;
-          voiceGateRef.current = gate;
-          voiceDestinationRef.current = destination;
-          outgoingAudioTrackRef.current = destination.stream.getAudioTracks()[0] || microphoneTrackRef.current;
-          context.resume().catch(() => {});
-        } else {
-          stream.getAudioTracks().forEach((track) => {
-            track.enabled = false;
-          });
-          outgoingAudioTrackRef.current = microphoneTrackRef.current;
-        }
+        outgoingAudioTrackRef.current = microphoneTrackRef.current;
         localStreamRef.current = stream;
         setLocalStream(stream);
         return stream;
@@ -179,29 +147,23 @@ export function useWebRtcRoom(socket, roomId) {
       voiceInputRef.current?.disconnect();
     };
 
-    let outgoingTrack = outgoingAudioTrackRef.current || microphoneTrack;
+    let outgoingTrack = microphoneTrack;
     if (effect !== "none") {
       if (!voiceContextRef.current) {
         const AudioContext = window.AudioContext || window.webkitAudioContext;
         if (!AudioContext) throw new Error("Voice effects are not supported in this browser");
         const context = new AudioContext({ latencyHint: "interactive" });
         const input = context.createGain();
-        const gate = context.createGain();
         const destination = context.createMediaStreamDestination();
         const source = context.createMediaStreamSource(new MediaStream([microphoneTrack]));
-        gate.gain.value = audioGateOpenRef.current ? 1 : 0;
         source.connect(input);
-        input.connect(gate);
-        gate.connect(destination);
         voiceContextRef.current = context;
         voiceInputRef.current = input;
-        voiceGateRef.current = gate;
         voiceDestinationRef.current = destination;
       }
 
       const context = voiceContextRef.current;
       const input = voiceInputRef.current;
-      const gate = voiceGateRef.current;
       const destination = voiceDestinationRef.current;
       clearVoiceGraph();
 
@@ -223,7 +185,7 @@ export function useWebRtcRoom(socket, roomId) {
           if (previous !== node) previous.connect(node);
           return node;
         });
-        nodes[nodes.length - 1].connect(gate || destination);
+        nodes[nodes.length - 1].connect(destination);
         register(...nodes);
       };
 
@@ -233,7 +195,7 @@ export function useWebRtcRoom(socket, roomId) {
         const feedback = context.createGain();
         delay.delayTime.value = 0.028;
         feedback.gain.value = 0.34;
-        input.connect(highPass).connect(delay).connect(gate || destination);
+        input.connect(highPass).connect(delay).connect(destination);
         delay.connect(feedback).connect(delay);
         register(highPass, delay, feedback);
       } else if (effect === "robot" || effect === "alien") {
@@ -244,7 +206,7 @@ export function useWebRtcRoom(socket, roomId) {
         oscillator.frequency.value = effect === "robot" ? 72 : 28;
         oscillator.connect(gain.gain);
         oscillator.start();
-        input.connect(gain).connect(gate || destination);
+        input.connect(gain).connect(destination);
         register(gain, oscillator);
       } else if (effect === "echo") {
         const delay = context.createDelay(0.8);
@@ -253,8 +215,8 @@ export function useWebRtcRoom(socket, roomId) {
         delay.delayTime.value = 0.22;
         feedback.gain.value = 0.28;
         wet.gain.value = 0.42;
-        input.connect(gate || destination);
-        input.connect(delay).connect(wet).connect(gate || destination);
+        input.connect(destination);
+        input.connect(delay).connect(wet).connect(destination);
         delay.connect(feedback).connect(delay);
         register(delay, feedback, wet);
       } else if (effect === "radio") {
@@ -268,17 +230,13 @@ export function useWebRtcRoom(socket, roomId) {
         const highPass = filter("highpass", effect === "cartoon" ? 420 : 260, 0, 0.7);
         connect(highPass, high);
       } else {
-        input.connect(gate || destination);
+        input.connect(destination);
       }
 
       await context.resume().catch(() => {});
       outgoingTrack = destination.stream.getAudioTracks()[0];
     } else {
       clearVoiceGraph();
-      if (voiceInputRef.current && voiceGateRef.current) {
-        voiceInputRef.current.connect(voiceGateRef.current);
-      }
-      outgoingTrack = voiceDestinationRef.current?.stream.getAudioTracks()[0] || microphoneTrack;
     }
 
     outgoingAudioTrackRef.current = outgoingTrack;
@@ -1201,8 +1159,6 @@ export function useWebRtcRoom(socket, roomId) {
       voiceContextRef.current?.close().catch(() => {});
       voiceContextRef.current = null;
       voiceInputRef.current = null;
-      voiceGateRef.current = null;
-      audioGateOpenRef.current = false;
       voiceDestinationRef.current = null;
       microphoneTrackRef.current = null;
       outgoingAudioTrackRef.current = null;
