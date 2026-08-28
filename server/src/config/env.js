@@ -35,5 +35,7 @@ export const env = {
   supportSmtpPort: Number(process.env.SUPPORT_SMTP_PORT || 465),
   supportSmtpSecure: process.env.SUPPORT_SMTP_SECURE !== "false",
   supportSmtpUser: process.env.SUPPORT_SMTP_USER || "talkitiv01@gmail.com",
-  supportSmtpPassword: String(process.env.SUPPORT_SMTP_PASSWORD || "").replace(/\s/g, "")
+  supportSmtpPassword: String(process.env.SUPPORT_SMTP_PASSWORD || "").replace(/\s/g, ""),
+  // HTTPS email APIs remain reachable from hosts that block outbound SMTP ports.
+  supportResendApiKey: String(process.env.RESEND_API_KEY || "").trim()
 };

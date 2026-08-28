@@ -120,7 +120,45 @@ function waitForRetry() {
   return new Promise((resolve) => setTimeout(resolve, 750));
 }
 
+async function deliverWithResend(message) {
+  const response = await fetch("https://api.resend.com/emails", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${env.supportResendApiKey}`,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+      from: message.from,
+      to: Array.isArray(message.to) ? message.to : [message.to],
+      subject: message.subject,
+      text: message.text,
+      attachments: (message.attachments || []).map((attachment) => ({
+        filename: attachment.filename,
+        content: attachment.content.toString("base64"),
+        contentType: attachment.contentType
+      }))
+    })
+  });
+
+  if (response.ok) return response.json().catch(() => ({}));
+  const payload = await response.json().catch(() => ({}));
+  const error = new Error(payload.message || "The email provider rejected the request.");
+  error.code = "EMAIL_API_ERROR";
+  error.responseCode = response.status;
+  throw error;
+}
+
 async function deliverSupportEmail(message) {
+  if (env.supportResendApiKey) return deliverWithResend(message);
+
+  // Render's free web services block SMTP ports, so fail quickly with an actionable
+  // configuration error instead of leaving people waiting for a socket timeout.
+  if (env.nodeEnv === "production" && env.supportSmtpHost === "smtp.gmail.com") {
+    const error = new Error("An HTTPS email provider must be configured for this production host.");
+    error.code = "EMAIL_PROVIDER_REQUIRED";
+    throw error;
+  }
+
   const attempts = [{ port: env.supportSmtpPort, secure: env.supportSmtpSecure }];
   // Gmail supports both STARTTLS (587) and implicit TLS (465). Try both because
   // hosted networks occasionally have a transient route problem to one of them.
@@ -180,6 +218,12 @@ supportRouter.post("/", supportRateLimit, screenshotUpload.single("screenshot"),
     });
     if (error.code === "EAUTH" || error.responseCode === 535) {
       return res.status(502).json({ message: "Support email authentication failed. Please contact the site owner." });
+    }
+    if (error.code === "EMAIL_PROVIDER_REQUIRED") {
+      return res.status(503).json({ message: "Support email delivery is being configured. Please try again shortly." });
+    }
+    if (error.code === "EMAIL_API_ERROR") {
+      return res.status(502).json({ message: "Support email delivery was rejected. Please try again shortly." });
     }
     if (isRetryableTransportError(error)) {
       return res.status(503).json({ message: publicTransportError(error) });
