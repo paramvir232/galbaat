@@ -5,6 +5,7 @@ import mongoose from "mongoose";
 import { env } from "../config/env.js";
 import { deleteRoom, findRoom, touchRoom } from "../services/roomService.js";
 import { cleanText, cleanUsername } from "../utils/sanitize.js";
+import { randomUUID } from "node:crypto";
 
 const rooms = new Map();
 const emptyRoomTimers = new Map();
@@ -20,6 +21,7 @@ const soundboardSounds = new Set(["laugh", "clap", "airhorn", "whistle", "drumro
 const SOUNDBOARD_COOLDOWN_MS = 1200;
 const roomFeatures = new Map();
 const roomRecordings = new Map();
+const webrtcPairSessions = new Map();
 
 function roomUsers(roomId) {
   if (!rooms.has(roomId)) rooms.set(roomId, new Map());
@@ -86,6 +88,36 @@ function boardParticipants(roomId) {
 
 function emitBoardUsers(io, roomId) {
   io.to(roomId).emit("whiteboard:users", boardParticipants(roomId));
+}
+
+function peerPairKey(firstId, secondId) {
+  return [firstId, secondId].sort().join(":");
+}
+
+function roomWebRtcSessions(roomId) {
+  if (!webrtcPairSessions.has(roomId)) webrtcPairSessions.set(roomId, new Map());
+  return webrtcPairSessions.get(roomId);
+}
+
+function beginWebRtcPair(io, roomId, offererId, answererId) {
+  const users = rooms.get(roomId);
+  if (!users?.has(offererId) || !users.has(answererId)) return;
+  const connectionId = randomUUID();
+  roomWebRtcSessions(roomId).set(peerPairKey(offererId, answererId), connectionId);
+  io.to(offererId).emit("webrtc:peer-ready", { id: answererId, connectionId });
+}
+
+function canSignalPeer(socket, targetId, connectionId) {
+  const roomId = socket.data.roomId;
+  const users = rooms.get(roomId);
+  const cleanConnectionId = cleanText(connectionId, 80);
+  return Boolean(
+    roomId &&
+      users?.has(socket.id) &&
+      users.has(targetId) &&
+      cleanConnectionId &&
+      roomWebRtcSessions(roomId).get(peerPairKey(socket.id, targetId)) === cleanConnectionId
+  );
 }
 
 function getRoomFeatures(roomId) {
@@ -286,6 +318,7 @@ async function scheduleEmptyRoomCleanup(roomId) {
       boardEditRequests.delete(roomId);
       roomFeatures.delete(roomId);
       roomRecordings.delete(roomId);
+      webrtcPairSessions.delete(roomId);
       await deleteRoom(roomId);
     } catch (error) {
       console.error(`Empty room cleanup failed for ${roomId}`, error);
@@ -319,6 +352,10 @@ async function leaveCurrentRoom(io, socket) {
     io.to(currentRoomId).emit("room:recording", getRoomRecording(currentRoomId));
   }
   users.delete(socket.id);
+  const sessions = webrtcPairSessions.get(currentRoomId);
+  sessions?.forEach((_connectionId, pairKey) => {
+    if (pairKey.split(":").includes(socket.id)) sessions.delete(pairKey);
+  });
   soundboardCooldowns.delete(socket.id);
   const nextHost = ensureRoomHost(currentRoomId);
   boardUsers.get(currentRoomId)?.delete(socket.id);
@@ -356,6 +393,10 @@ function removeDuplicateClientFromRoom(io, roomId, clientId, nextSocketId) {
   if (!duplicate) return null;
 
   users.delete(duplicate.id);
+  const sessions = webrtcPairSessions.get(roomId);
+  sessions?.forEach((_connectionId, pairKey) => {
+    if (pairKey.split(":").includes(duplicate.id)) sessions.delete(pairKey);
+  });
   soundboardCooldowns.delete(duplicate.id);
   boardUsers.get(roomId)?.delete(duplicate.id);
   const oldSocket = io.sockets.sockets.get(duplicate.id);
@@ -1053,30 +1094,35 @@ export function registerSocketHandlers(io) {
       socket.data.webrtcReady = true;
       // Existing members own the first offer after the joiner has completed
       // microphone setup and has an answer-side peer ready for every member.
-      socket.to(roomId).emit("webrtc:peer-ready", { id: socket.id });
+      roomUsers(roomId).forEach((participant) => {
+        if (participant.id !== socket.id) beginWebRtcPair(io, roomId, participant.id, socket.id);
+      });
     });
 
-    socket.on("webrtc:offer", ({ to, description }) => {
-      if (!canSignal(socket)) return;
+    socket.on("webrtc:offer", ({ to, description, connectionId }) => {
+      if (!canSignalPeer(socket, to, connectionId)) return;
       io.to(to).emit("webrtc:offer", {
         from: socket.id,
-        description
+        description,
+        connectionId
       });
     });
 
-    socket.on("webrtc:answer", ({ to, description }) => {
-      if (!canSignal(socket)) return;
+    socket.on("webrtc:answer", ({ to, description, connectionId }) => {
+      if (!canSignalPeer(socket, to, connectionId)) return;
       io.to(to).emit("webrtc:answer", {
         from: socket.id,
-        description
+        description,
+        connectionId
       });
     });
 
-    socket.on("webrtc:ice-candidate", ({ to, candidate }) => {
-      if (!canSignal(socket)) return;
+    socket.on("webrtc:ice-candidate", ({ to, candidate, connectionId }) => {
+      if (!canSignalPeer(socket, to, connectionId)) return;
       io.to(to).emit("webrtc:ice-candidate", {
         from: socket.id,
-        candidate
+        candidate,
+        connectionId
       });
     });
 
@@ -1084,9 +1130,9 @@ export function registerSocketHandlers(io) {
       const roomId = socket.data.roomId;
       const users = rooms.get(roomId);
       if (!canSignal(socket) || !users?.has(to)) return;
-      // Reset the requester first so it is ready to answer the replacement offer.
-      socket.emit("webrtc:resync-reset", { peerId: to });
-      io.to(to).emit("webrtc:resync-request", { from: socket.id });
+      // Replace the pair with a new session. Older offers and candidates are
+      // rejected at the server instead of reaching a newly created peer.
+      beginWebRtcPair(io, roomId, socket.id, to);
     });
 
     socket.on("webrtc:video-sync-request", ({ to }) => {

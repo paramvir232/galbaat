@@ -631,11 +631,11 @@ export default function RoomPage() {
   }, [mobilePanel, navigate, notifyIncomingMessage, playHandRaiseAlert, playJoinAlert, playJoinRequestAlert, room, self?.clientId, self?.id, setVoiceEffect, socket, stopTalking, syncPeerAudioHealth, syncPeers]);
 
   useEffect(() => {
-    function onPeerReady({ id }) {
-      if (!id || id === socket.id) return;
+    function onPeerReady({ id, connectionId }) {
+      if (!id || !connectionId || id === socket.id) return;
       // Existing participants make the first offer to a newly joined user.
       // This is the only offer-side creation path for normal room joins.
-      connectToPeers([{ id }], { offer: true }).catch(() => {
+      connectToPeers([{ id, connectionId }], { offer: true }).catch(() => {
         setStatus((current) => (current === "connected" ? "voice-limited" : current));
       });
     }

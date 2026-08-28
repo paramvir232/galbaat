@@ -394,7 +394,7 @@ export function useWebRtcRoom(socket, roomId) {
 
   const renegotiatePeer = useCallback(
     async (peerId, pc, { iceRestart = false } = {}) => {
-      if (!pc || pc.connectionState === "closed") return;
+      if (!pc || pc.connectionState === "closed" || !pc.__talkietivConnectionId) return;
       if (pc.signalingState !== "stable" || negotiatingRef.current.has(peerId)) {
         negotiationQueueRef.current.add(peerId);
         return;
@@ -404,7 +404,11 @@ export function useWebRtcRoom(socket, roomId) {
       try {
         const offer = await pc.createOffer({ iceRestart });
         await pc.setLocalDescription(offer);
-        socket.emit("webrtc:offer", { to: peerId, description: pc.localDescription });
+        socket.emit("webrtc:offer", {
+          to: peerId,
+          description: pc.localDescription,
+          connectionId: pc.__talkietivConnectionId
+        });
       } finally {
         negotiatingRef.current.delete(peerId);
         if (negotiationQueueRef.current.delete(peerId)) {
@@ -658,7 +662,7 @@ export function useWebRtcRoom(socket, roomId) {
 
 
   const createPeerInner = useCallback(
-    async (peerId, initiator = false) => {
+    async (peerId, initiator = false, connectionId = null) => {
       const stream = await ensureMedia();
       if (peersRef.current.has(peerId)) return peersRef.current.get(peerId);
 
@@ -671,6 +675,7 @@ export function useWebRtcRoom(socket, roomId) {
       // Only the peer selected by the room handshake can create the first offer.
       pc.__galbaatCanOffer = Boolean(initiator);
       pc.__galbaatInitialOfferer = Boolean(initiator);
+      pc.__talkietivConnectionId = connectionId;
       peerOffererRef.current.set(peerId, Boolean(initiator));
 
       const microphoneTrack = outgoingAudioTrackRef.current || stream.getAudioTracks()[0];
@@ -695,7 +700,11 @@ export function useWebRtcRoom(socket, roomId) {
 
       pc.onicecandidate = (event) => {
         if (event.candidate) {
-          socket.emit("webrtc:ice-candidate", { to: peerId, candidate: event.candidate });
+          socket.emit("webrtc:ice-candidate", {
+            to: peerId,
+            candidate: event.candidate,
+            connectionId: pc.__talkietivConnectionId
+          });
         }
       };
 
@@ -820,7 +829,7 @@ export function useWebRtcRoom(socket, roomId) {
   );
 
   const createPeer = useCallback(
-    async (peerId, initiator = false) => {
+    async (peerId, initiator = false, connectionId = null) => {
       const enableInitialOffer = async (pc) => {
         if (!initiator || pc.__galbaatCanOffer) return;
         pc.__galbaatCanOffer = true;
@@ -833,6 +842,10 @@ export function useWebRtcRoom(socket, roomId) {
 
       const activePeer = peersRef.current.get(peerId);
       if (activePeer) {
+        if (connectionId && activePeer.__talkietivConnectionId !== connectionId) {
+          removePeer(peerId);
+          return createPeer(peerId, initiator, connectionId);
+        }
         await enableInitialOffer(activePeer);
         if (initiator && activePeer.connectionState !== "closed" && (activePeer.connectionState === "disconnected" || activePeer.iceConnectionState === "disconnected")) {
           renegotiatePeer(peerId, activePeer, { iceRestart: true }).catch(() => {});
@@ -843,6 +856,10 @@ export function useWebRtcRoom(socket, roomId) {
       const existing = creatingPeersRef.current.get(peerId);
       if (existing) {
         const pc = await existing;
+        if (connectionId && pc?.__talkietivConnectionId !== connectionId) {
+          removePeer(peerId);
+          return createPeer(peerId, initiator, connectionId);
+        }
         await enableInitialOffer(pc);
         if (initiator && pc.connectionState !== "closed" && (pc.connectionState === "disconnected" || pc.iceConnectionState === "disconnected")) {
           renegotiatePeer(peerId, pc, { iceRestart: true }).catch(() => {});
@@ -850,7 +867,7 @@ export function useWebRtcRoom(socket, roomId) {
         return pc;
       }
 
-      const promise = createPeerInner(peerId, initiator);
+      const promise = createPeerInner(peerId, initiator, connectionId);
       creatingPeersRef.current.set(peerId, promise);
       try {
         const pc = await promise;
@@ -859,7 +876,7 @@ export function useWebRtcRoom(socket, roomId) {
         creatingPeersRef.current.delete(peerId);
       }
     },
-    [createPeerInner, renegotiatePeer]
+    [createPeerInner, removePeer, renegotiatePeer]
   );
 
   const recoverPeer = useCallback(
@@ -873,17 +890,14 @@ export function useWebRtcRoom(socket, roomId) {
       if (existingTimer) window.clearTimeout(existingTimer);
       mediaRecoveryTimersRef.current.delete(peerId);
 
-      const isOfferer = peerOffererRef.current.get(peerId) ?? socket.id > peerId;
-      removePeer(peerId, { preserveOfferer: true });
+      removePeer(peerId);
       peerRecoveryCooldownsRef.current.set(peerId, now);
-      peerOffererRef.current.set(peerId, isOfferer);
-      await createPeer(peerId, isOfferer);
-      if (!isOfferer) {
-        // Ask the designated initial offerer to recreate this pair.
-        socket.emit("webrtc:resync-request", { to: peerId });
-      }
+      // The server creates a new pair session and chooses the offer-side peer.
+      // Do not locally recreate here: late candidates from the old session must
+      // never reach the replacement connection.
+      socket.emit("webrtc:resync-request", { to: peerId });
     },
-    [createPeer, removePeer, socket]
+    [removePeer, socket]
   );
 
   const scheduleMediaRecovery = useCallback(
@@ -926,7 +940,7 @@ export function useWebRtcRoom(socket, roomId) {
       const connectedPeers = await Promise.all(
         peers
           .filter((peer) => peer?.id && peer.id !== socket.id)
-          .map((peer) => createPeer(peer.id, offer))
+          .map((peer) => createPeer(peer.id, offer, peer.connectionId || null))
       );
       peers
         .filter((peer) => peer?.id && peer.id !== socket.id)
@@ -940,48 +954,10 @@ export function useWebRtcRoom(socket, roomId) {
       const pending = pendingOffersRef.current.get(from);
       pendingOffersRef.current.delete(from);
       if (!pending) return;
+      const { description, connectionId } = pending;
       const pc = peersRef.current.get(from);
-      if (!pc || pc.connectionState === "closed") return;
+      if (!pc || pc.connectionState === "closed" || pc.__talkietivConnectionId !== connectionId) return;
 
-      const isPolite = socket.id < from;
-      const offerCollision = pending.type === "offer" && (negotiatingRef.current.has(from) || pc.signalingState !== "stable");
-
-      if (offerCollision) {
-        if (!isPolite) {
-          // Impolite peer ignores the incoming offer
-          return;
-        }
-        // Polite peer rolls back its local offer
-        await pc.setLocalDescription({ type: "rollback" }).catch(() => {});
-      }
-
-      await pc.setRemoteDescription(pending);
-      const pendingCandidates = pendingCandidatesRef.current.get(from) || [];
-      pendingCandidatesRef.current.delete(from);
-      await Promise.all(pendingCandidates.map((candidate) => pc.addIceCandidate(candidate).catch(() => {})));
-      const answer = await pc.createAnswer();
-      await pc.setLocalDescription(answer);
-      pc.__galbaatCanOffer = true;
-      socket.emit("webrtc:answer", { to: from, description: pc.localDescription });
-
-      if (negotiationQueueRef.current.delete(from)) {
-        renegotiatePeer(from, pc).catch(() => {});
-      }
-    },
-    [renegotiatePeer, socket]
-  );
-
-  useEffect(() => {
-    if (!socket) return undefined;
-
-    const handleOffer = ({ from, description }) => queuePeerSignal(from, async () => {
-      if (creatingPeersRef.current.has(from)) {
-        pendingOffersRef.current.set(from, description);
-        await creatingPeersRef.current.get(from).catch(() => {});
-        await processPendingOffer(from);
-        return;
-      }
-      const pc = await createPeer(from, false);
       const isPolite = socket.id < from;
       const offerCollision = description.type === "offer" && (negotiatingRef.current.has(from) || pc.signalingState !== "stable");
 
@@ -995,28 +971,73 @@ export function useWebRtcRoom(socket, roomId) {
       }
 
       await pc.setRemoteDescription(description);
-      const pendingCandidates = pendingCandidatesRef.current.get(from) || [];
-      pendingCandidatesRef.current.delete(from);
+      const pendingKey = `${from}:${connectionId}`;
+      const pendingCandidates = pendingCandidatesRef.current.get(pendingKey) || [];
+      pendingCandidatesRef.current.delete(pendingKey);
       await Promise.all(pendingCandidates.map((candidate) => pc.addIceCandidate(candidate).catch(() => {})));
       const answer = await pc.createAnswer();
       await pc.setLocalDescription(answer);
       pc.__galbaatCanOffer = true;
-      socket.emit("webrtc:answer", { to: from, description: pc.localDescription });
+      socket.emit("webrtc:answer", { to: from, description: pc.localDescription, connectionId });
+
+      if (negotiationQueueRef.current.delete(from)) {
+        renegotiatePeer(from, pc).catch(() => {});
+      }
+    },
+    [renegotiatePeer, socket]
+  );
+
+  useEffect(() => {
+    if (!socket) return undefined;
+
+    const handleOffer = ({ from, description, connectionId }) => queuePeerSignal(from, async () => {
+      if (!connectionId) return;
+      if (creatingPeersRef.current.has(from)) {
+        pendingOffersRef.current.set(from, { description, connectionId });
+        await creatingPeersRef.current.get(from).catch(() => {});
+        await processPendingOffer(from);
+        return;
+      }
+      const pc = await createPeer(from, false, connectionId);
+      if (!pc || pc.__talkietivConnectionId !== connectionId) return;
+      const isPolite = socket.id < from;
+      const offerCollision = description.type === "offer" && (negotiatingRef.current.has(from) || pc.signalingState !== "stable");
+
+      if (offerCollision) {
+        if (!isPolite) {
+          // Impolite peer ignores the incoming offer
+          return;
+        }
+        // Polite peer rolls back its local offer
+        await pc.setLocalDescription({ type: "rollback" }).catch(() => {});
+      }
+
+      await pc.setRemoteDescription(description);
+      const pendingKey = `${from}:${connectionId}`;
+      const pendingCandidates = pendingCandidatesRef.current.get(pendingKey) || [];
+      pendingCandidatesRef.current.delete(pendingKey);
+      await Promise.all(pendingCandidates.map((candidate) => pc.addIceCandidate(candidate).catch(() => {})));
+      const answer = await pc.createAnswer();
+      await pc.setLocalDescription(answer);
+      pc.__galbaatCanOffer = true;
+      socket.emit("webrtc:answer", { to: from, description: pc.localDescription, connectionId });
 
       if (negotiationQueueRef.current.delete(from)) {
         renegotiatePeer(from, pc).catch(() => {});
       }
     }).catch(() => {});
 
-    const handleAnswer = ({ from, description }) => queuePeerSignal(from, async () => {
+    const handleAnswer = ({ from, description, connectionId }) => queuePeerSignal(from, async () => {
+      if (!connectionId) return;
       if (creatingPeersRef.current.has(from)) {
         await creatingPeersRef.current.get(from).catch(() => {});
       }
       const pc = peersRef.current.get(from);
-      if (!pc || pc.signalingState !== "have-local-offer") return;
+      if (!pc || pc.__talkietivConnectionId !== connectionId || pc.signalingState !== "have-local-offer") return;
       await pc.setRemoteDescription(description);
-      const pendingCandidates = pendingCandidatesRef.current.get(from) || [];
-      pendingCandidatesRef.current.delete(from);
+      const pendingKey = `${from}:${connectionId}`;
+      const pendingCandidates = pendingCandidatesRef.current.get(pendingKey) || [];
+      pendingCandidatesRef.current.delete(pendingKey);
       await Promise.all(pendingCandidates.map((candidate) => pc.addIceCandidate(candidate).catch(() => {})));
 
       if (negotiationQueueRef.current.delete(from)) {
@@ -1024,16 +1045,18 @@ export function useWebRtcRoom(socket, roomId) {
       }
     }).catch(() => {});
 
-    const handleIce = ({ from, candidate }) => queuePeerSignal(from, async () => {
-      if (!candidate) return;
+    const handleIce = ({ from, candidate, connectionId }) => queuePeerSignal(from, async () => {
+      if (!candidate || !connectionId) return;
       if (creatingPeersRef.current.has(from)) {
         await creatingPeersRef.current.get(from).catch(() => {});
       }
       const pc = peersRef.current.get(from);
+      if (pc && pc.__talkietivConnectionId !== connectionId) return;
       if (!pc || !pc.remoteDescription) {
-        const pending = pendingCandidatesRef.current.get(from) || [];
+        const pendingKey = `${from}:${connectionId}`;
+        const pending = pendingCandidatesRef.current.get(pendingKey) || [];
         pending.push(candidate);
-        pendingCandidatesRef.current.set(from, pending);
+        pendingCandidatesRef.current.set(pendingKey, pending);
         return;
       }
       await pc.addIceCandidate(candidate).catch(() => {});
@@ -1047,22 +1070,11 @@ export function useWebRtcRoom(socket, roomId) {
       resyncVideoToPeer(from).catch(() => {});
     };
 
-    const handleResyncRequest = ({ from }) => {
-      // Only the peer selected to make the initial offer restarts a failed pair.
-      if (peerOffererRef.current.get(from) ?? socket.id > from) recoverPeer(from).catch(() => {});
-    };
-
-    const handleResyncReset = ({ peerId }) => {
-      recoverPeer(peerId).catch(() => {});
-    };
-
     socket.on("webrtc:offer", handleOffer);
     socket.on("webrtc:answer", handleAnswer);
     socket.on("webrtc:ice-candidate", handleIce);
     socket.on("webrtc:peer-left", handlePeerLeft);
     socket.on("webrtc:video-sync-request", handleVideoSyncRequest);
-    socket.on("webrtc:resync-request", handleResyncRequest);
-    socket.on("webrtc:resync-reset", handleResyncReset);
 
     return () => {
       socket.off("webrtc:offer", handleOffer);
@@ -1070,8 +1082,6 @@ export function useWebRtcRoom(socket, roomId) {
       socket.off("webrtc:ice-candidate", handleIce);
       socket.off("webrtc:peer-left", handlePeerLeft);
       socket.off("webrtc:video-sync-request", handleVideoSyncRequest);
-      socket.off("webrtc:resync-request", handleResyncRequest);
-      socket.off("webrtc:resync-reset", handleResyncReset);
     };
   }, [createPeer, processPendingOffer, queuePeerSignal, recoverPeer, removePeer, renegotiatePeer, resyncVideoToPeer, socket]);
 
