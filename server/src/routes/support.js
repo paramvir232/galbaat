@@ -116,6 +116,13 @@ function publicTransportError(error) {
   return `Support email transport failed (${code}).`;
 }
 
+function publicProviderError(error) {
+  const message = cleanText(String(error?.message || ""), 300);
+  return message
+    ? `Support email delivery was rejected: ${message}`
+    : "Support email delivery was rejected by the email provider.";
+}
+
 function waitForRetry() {
   return new Promise((resolve) => setTimeout(resolve, 750));
 }
@@ -130,6 +137,7 @@ async function deliverWithResend(message) {
     body: JSON.stringify({
       from: message.from,
       to: Array.isArray(message.to) ? message.to : [message.to],
+      reply_to: message.replyTo,
       subject: message.subject,
       text: message.text,
       attachments: (message.attachments || []).map((attachment) => ({
@@ -195,8 +203,9 @@ supportRouter.post("/", supportRateLimit, screenshotUpload.single("screenshot"),
     }
 
     await deliverSupportEmail({
-      from: `Talkietiv Support <${env.supportEmailFrom || env.supportSmtpUser}>`,
+      from: env.supportEmailFrom || env.supportSmtpUser,
       to: env.supportEmailTo,
+      replyTo: env.supportEmailTo,
       subject: `[Talkietiv] Anonymous ${category === "bug" ? "bug report" : "query"}`,
       text: `Anonymous ${category === "bug" ? "bug report" : "query"}\n\n${message}\n\nSent: ${new Date().toISOString()}`,
       attachments: req.file
@@ -223,7 +232,7 @@ supportRouter.post("/", supportRateLimit, screenshotUpload.single("screenshot"),
       return res.status(503).json({ message: "Support email delivery is being configured. Please try again shortly." });
     }
     if (error.code === "EMAIL_API_ERROR") {
-      return res.status(502).json({ message: "Support email delivery was rejected. Please try again shortly." });
+      return res.status(502).json({ message: publicProviderError(error) });
     }
     if (isRetryableTransportError(error)) {
       return res.status(503).json({ message: publicTransportError(error) });
