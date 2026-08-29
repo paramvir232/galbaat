@@ -959,47 +959,47 @@ export default function ChatPanel({
                   )}
                 </>
               )}
+              {visibleReactions.length > 0 && reactionPickerId !== message.id && (
+                <div className={`absolute top-[calc(100%-0.45rem)] z-10 flex max-w-[calc(100%-1rem)] flex-wrap gap-1 ${isOwn ? "right-2 justify-end" : "left-2 justify-start"}`}>
+                  {visibleReactions.map(([emoji, count]) => (
+                    <button
+                      key={emoji}
+                      type="button"
+                      onClick={() => reactToMessage(message.id, emoji)}
+                      className="inline-flex h-7 items-center gap-1 rounded-full border border-line bg-panel px-2 text-xs text-slate-100 shadow-lg hover:bg-white/10"
+                    >
+                      <span>{emoji}</span>
+                      {count > 1 && <span className="text-[11px] font-semibold text-slate-300">{count}</span>}
+                    </button>
+                  ))}
+                </div>
+              )}
+              {reactionPickerId === message.id && (
+                <div className={`absolute top-[calc(100%-0.75rem)] z-20 flex items-center rounded-full border border-line bg-panel/95 p-1 shadow-xl ${isOwn ? "right-2" : "left-2"}`}>
+                  {message.message && (
+                    <button
+                      type="button"
+                      onClick={() => copyMessageText(message)}
+                      className="grid h-8 w-8 place-items-center rounded-full text-slate-300 hover:bg-white/10 hover:text-white"
+                      title="Copy message"
+                    >
+                      <Copy className="h-3.5 w-3.5" />
+                    </button>
+                  )}
+                  {REACTION_OPTIONS.map((emoji) => (
+                    <button
+                      key={emoji}
+                      type="button"
+                      onClick={() => reactToMessage(message.id, emoji)}
+                      className="grid h-8 w-8 place-items-center rounded-full text-sm hover:bg-white/10"
+                      title={`React ${emoji}`}
+                    >
+                      {emoji}
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
-            {visibleReactions.length > 0 && (
-              <div className="mt-1 flex max-w-[92%] flex-wrap gap-1">
-                {visibleReactions.map(([emoji, count]) => (
-                  <button
-                    key={emoji}
-                    type="button"
-                    onClick={() => reactToMessage(message.id, emoji)}
-                    className="inline-flex h-7 items-center gap-1 rounded-full border border-line bg-panel px-2 text-xs text-slate-100 shadow-lg hover:bg-white/10"
-                  >
-                    <span>{emoji}</span>
-                    {count > 1 && <span className="text-[11px] font-semibold text-slate-300">{count}</span>}
-                  </button>
-                ))}
-              </div>
-            )}
-            {reactionPickerId === message.id && (
-              <div className="mt-1 flex items-center rounded-full border border-line bg-panel/95 p-1 shadow-xl">
-                {message.message && (
-                  <button
-                    type="button"
-                    onClick={() => copyMessageText(message)}
-                    className="grid h-8 w-8 place-items-center rounded-full text-slate-300 hover:bg-white/10 hover:text-white"
-                    title="Copy message"
-                  >
-                    <Copy className="h-3.5 w-3.5" />
-                  </button>
-                )}
-                {REACTION_OPTIONS.map((emoji) => (
-                  <button
-                    key={emoji}
-                    type="button"
-                    onClick={() => reactToMessage(message.id, emoji)}
-                    className="grid h-8 w-8 place-items-center rounded-full text-sm hover:bg-white/10"
-                    title={`React ${emoji}`}
-                  >
-                    {emoji}
-                  </button>
-                ))}
-              </div>
-            )}
             </div>
           );
         })}
