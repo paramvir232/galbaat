@@ -847,26 +847,42 @@ export default function RoomPage() {
     });
   }
 
-  function selectSupportScreenshot(event) {
-    const [file] = event.target.files || [];
+  function setSupportScreenshotFile(file) {
     setSupportError("");
     if (!file) {
       setSupportScreenshot(null);
-      return;
+      return false;
     }
     if (!file.type.startsWith("image/") || !["image/jpeg", "image/png", "image/webp"].includes(file.type)) {
       setSupportScreenshot(null);
       setSupportError("Please attach a PNG, JPEG, or WebP screenshot.");
-      event.target.value = "";
-      return;
+      return false;
     }
     if (file.size > 5 * 1024 * 1024) {
       setSupportScreenshot(null);
       setSupportError("Screenshot must be 5 MB or smaller.");
-      event.target.value = "";
-      return;
+      return false;
     }
     setSupportScreenshot(file);
+    return true;
+  }
+
+  function selectSupportScreenshot(event) {
+    const [file] = event.target.files || [];
+    if (!setSupportScreenshotFile(file)) event.target.value = "";
+  }
+
+  function pasteSupportScreenshot(event) {
+    const item = [...(event.clipboardData?.items || [])].find((entry) => entry.type.startsWith("image/"));
+    const image = item?.getAsFile();
+    if (!image) return;
+
+    event.preventDefault();
+    const extension = image.type === "image/jpeg" ? "jpg" : image.type.split("/")[1] || "png";
+    const file = new window.File([image], `pasted-screenshot-${Date.now()}.${extension}`, { type: image.type });
+    if (setSupportScreenshotFile(file) && supportScreenshotInputRef.current) {
+      supportScreenshotInputRef.current.value = "";
+    }
   }
 
   async function sendSupportReport(event) {
@@ -1535,6 +1551,7 @@ export default function RoomPage() {
                 id="support-message"
                 value={supportMessage}
                 onChange={(event) => setSupportMessage(event.target.value)}
+                onPaste={pasteSupportScreenshot}
                 maxLength={4000}
                 rows={5}
                 required
