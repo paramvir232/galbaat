@@ -1122,12 +1122,12 @@ export default function RoomPage() {
 
   return (
     <main className="flex h-dvh min-h-0 flex-col overflow-hidden bg-black p-2 text-slate-100 sm:p-4">
-      <header className="apple-surface relative z-40 mb-2 flex shrink-0 flex-col gap-2 rounded-xl px-3 py-3 sm:mb-3 sm:flex-row sm:items-center sm:justify-between sm:gap-3 sm:px-4 sm:py-3">
+      <header className="apple-surface relative z-40 mb-2 flex shrink-0 flex-col gap-2 rounded-xl px-3 py-2.5 sm:mb-2 sm:flex-row sm:items-center sm:justify-between sm:gap-3 sm:px-4 sm:py-2">
         <div className="flex w-full min-w-0 flex-1 items-center gap-2 sm:w-auto sm:gap-3">
           <button type="button" onClick={leaveRoom} title="Leave room" className="apple-control grid h-11 w-11 shrink-0 place-items-center rounded-md text-slate-300 sm:h-10 sm:w-10">
             <ArrowLeft className="h-4 w-4" />
           </button>
-          <BrandMark className="w-[110px] sm:w-[170px] h-auto -translate-y-[3px] sm:-translate-y-[5px]" />
+          <BrandMark className="w-[105px] sm:w-[150px] h-auto -translate-y-[2px] sm:-translate-y-[4px]" />
           <div className="min-w-0">
             <div className="flex items-center gap-2">
               <Hash className="h-4 w-4 text-slate-500" />

@@ -843,7 +843,7 @@ export default function ChatPanel({
                 if (reactionAllowed) setReactionPickerId(message.id);
               }}
               onMouseLeave={() => setReactionPickerId((id) => (id === message.id ? null : id))}
-              className={`group relative w-fit min-w-0 max-w-[92%] rounded-[18px] border px-3.5 py-2.5 shadow-sm sm:max-w-[82%] ${
+              className={`group relative w-fit min-w-0 max-w-[92%] rounded-[18px] border px-3 py-1.5 shadow-sm sm:max-w-[82%] ${
                 isSystem
                   ? "border-transparent bg-white/[0.03] text-center"
                   : mentioned
@@ -853,7 +853,7 @@ export default function ChatPanel({
                       : "rounded-bl-md border-white/[0.06] bg-white/[0.055]"
               } ${isDeleted ? "border-dashed bg-white/[0.025]" : ""}`}
             >
-              <div className="mb-0.5 flex items-center justify-between gap-3">
+              <div className="flex items-center justify-between gap-3">
                 <span className={`truncate text-xs font-semibold ${isOwn ? "text-mint" : "text-slate-100"}`}>{isOwn ? "You" : message.username}</span>
                 <span className="flex shrink-0 items-center gap-1">
                   {canManage && !isEditing && (
