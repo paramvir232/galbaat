@@ -378,13 +378,6 @@ export default function ChatPanel({
     if (imageZoom === 1) setImagePan({ x: 0, y: 0 });
   }, [imageZoom]);
 
-  useEffect(() => {
-    const textarea = inputRef.current;
-    if (!textarea) return;
-    textarea.style.height = "auto";
-    textarea.style.height = `${Math.max(44, Math.min(120, textarea.scrollHeight))}px`;
-  }, [value]);
-
   function queueAttachment(file) {
     setShowEmojis(false);
     setPendingAttachment((current) => {
@@ -1050,8 +1043,7 @@ export default function ChatPanel({
             maxLength={1000}
             rows={1}
             placeholder="Message, @mention, or paste an image"
-            className="scrollbar-none min-w-0 flex-1 basis-0 resize-none bg-transparent px-1 py-2 text-base text-slate-100 outline-none placeholder:text-slate-500 sm:text-sm"
-            style={{ height: "44px", maxHeight: "120px" }}
+            className="scrollbar-none h-11 min-h-11 max-h-11 min-w-0 flex-1 basis-0 resize-none overflow-y-auto bg-transparent px-1 py-2 text-base leading-5 text-slate-100 outline-none placeholder:text-slate-500 sm:text-sm"
           />
           <button
             type="button"
