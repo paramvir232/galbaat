@@ -114,6 +114,8 @@ export default function RoomPage() {
   const notificationPermissionRequestedRef = useRef(false);
   const supportScreenshotInputRef = useRef(null);
   const originalTitleRef = useRef(document.title);
+  const audioTipsRef = useRef(null);
+  const joinPanelRef = useRef(null);
 
   const redirectHomeWithRoomNotice = useCallback((message) => {
     joinedRef.current = false;
@@ -134,6 +136,16 @@ export default function RoomPage() {
     const reservedWidth = participantsCollapsed ? 500 : 820;
     return Math.max(MIN_CHAT_WIDTH, Math.min(MAX_CHAT_WIDTH, window.innerWidth - reservedWidth));
   }, [participantsCollapsed]);
+
+  useEffect(() => {
+    if (!audioTipsOpen && !joinPanelOpen) return undefined;
+    const closeOnOutsidePress = (event) => {
+      if (audioTipsOpen && !audioTipsRef.current?.contains(event.target)) setAudioTipsOpen(false);
+      if (joinPanelOpen && !joinPanelRef.current?.contains(event.target)) setJoinPanelOpen(false);
+    };
+    document.addEventListener("pointerdown", closeOnOutsidePress, true);
+    return () => document.removeEventListener("pointerdown", closeOnOutsidePress, true);
+  }, [audioTipsOpen, joinPanelOpen]);
 
   useEffect(() => {
     // A screen track uses the local video pipeline, but it is not camera video.
@@ -1137,7 +1149,7 @@ export default function RoomPage() {
           </div>
         </div>
 
-        <div className="relative z-50 flex w-full justify-center sm:absolute sm:left-1/2 sm:top-1/2 sm:w-auto sm:-translate-x-1/2 sm:-translate-y-1/2">
+        <div ref={audioTipsRef} className="relative z-50 flex w-full justify-center sm:absolute sm:left-1/2 sm:top-1/2 sm:w-auto sm:-translate-x-1/2 sm:-translate-y-1/2">
           <button
             type="button"
             onClick={() => setAudioTipsOpen((open) => !open)}
@@ -1150,7 +1162,7 @@ export default function RoomPage() {
             Audio tips
           </button>
           {audioTipsOpen && (
-            <section className="apple-surface absolute left-1/2 top-12 w-[min(22rem,calc(100vw-2rem))] -translate-x-1/2 rounded-xl p-4 text-left shadow-2xl" role="dialog" aria-label="Audio troubleshooting tips">
+            <section className="absolute left-1/2 top-12 w-[min(22rem,calc(100vw-2rem))] -translate-x-1/2 rounded-xl border border-line bg-[#151515] p-4 text-left shadow-2xl" role="dialog" aria-label="Audio troubleshooting tips">
               <div className="mb-3 flex items-start justify-between gap-3">
                 <div>
                   <p className="text-sm font-black text-white">Having audio trouble?</p>
@@ -1204,7 +1216,7 @@ export default function RoomPage() {
             <FileText className="h-4 w-4" />
           </button>
           {isHost && (
-            <div className="relative z-50">
+            <div ref={joinPanelRef} className="relative z-50">
             <button
               type="button"
               onClick={() => {
@@ -1458,8 +1470,10 @@ export default function RoomPage() {
       )}
 
       {settingsOpen && (
-        <div className="fixed inset-0 z-50 grid place-items-center bg-black/75 p-4 backdrop-blur-md">
-          <div className="apple-surface max-h-[calc(100dvh-2rem)] w-full max-w-md overflow-y-auto rounded-xl p-5 shadow-2xl">
+        <div className="fixed inset-0 z-50 grid place-items-center bg-black/75 p-4 backdrop-blur-md" onMouseDown={(event) => {
+          if (event.target === event.currentTarget) setSettingsOpen(false);
+        }}>
+          <div className="apple-surface max-h-[calc(100dvh-2rem)] w-full max-w-md overflow-y-auto rounded-xl p-5 shadow-2xl" onMouseDown={(event) => event.stopPropagation()}>
             <div className="mb-4 flex items-center justify-between gap-3">
               <div>
                 <h2 className="text-base font-bold text-slate-100">Settings</h2>

@@ -118,6 +118,7 @@ export default function Soundboard({ socket, roomId, disabled = false }) {
   const [cooldownUntil, setCooldownUntil] = useState(0);
   const [notice, setNotice] = useState("");
   const contextRef = useRef(null);
+  const popoverRef = useRef(null);
   const cooldownTimerRef = useRef(null);
   const noticeTimerRef = useRef(null);
 
@@ -166,6 +167,15 @@ export default function Soundboard({ socket, roomId, disabled = false }) {
     return () => socket.off("soundboard:play", onSoundboardPlay);
   }, [socket, unlockAudio]);
 
+  useEffect(() => {
+    if (!open) return undefined;
+    const closeOnOutsidePress = (event) => {
+      if (!popoverRef.current?.contains(event.target)) setOpen(false);
+    };
+    document.addEventListener("pointerdown", closeOnOutsidePress, true);
+    return () => document.removeEventListener("pointerdown", closeOnOutsidePress, true);
+  }, [open]);
+
   useEffect(() => () => {
     window.clearTimeout(cooldownTimerRef.current);
     window.clearTimeout(noticeTimerRef.current);
@@ -189,7 +199,7 @@ export default function Soundboard({ socket, roomId, disabled = false }) {
   }
 
   return (
-    <div className="relative">
+    <div ref={popoverRef} className="relative">
       <button
         type="button"
         disabled={disabled}

@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { QRCodeSVG } from "qrcode.react";
 import { Check, Copy, Link2, QrCode } from "lucide-react";
@@ -7,11 +7,14 @@ export default function ShareRoom({ roomId }) {
   const [copied, setCopied] = useState(false);
   const [showQr, setShowQr] = useState(false);
   const [qrPosition, setQrPosition] = useState({ right: 12, top: 60 });
+  const rootRef = useRef(null);
   const qrButtonRef = useRef(null);
+  const qrPopoverRef = useRef(null);
   const inviteUrl = useMemo(() => `${window.location.origin}/r/${roomId}`, [roomId]);
   const qrPopover = showQr
     ? createPortal(
         <div
+          ref={qrPopoverRef}
           className="fixed z-[9999] rounded-xl bg-white p-3 shadow-2xl"
           style={qrPosition}
         >
@@ -20,6 +23,16 @@ export default function ShareRoom({ roomId }) {
         document.body
       )
     : null;
+
+  useEffect(() => {
+    if (!showQr) return undefined;
+    const closeOnOutsidePress = (event) => {
+      if (rootRef.current?.contains(event.target) || qrPopoverRef.current?.contains(event.target)) return;
+      setShowQr(false);
+    };
+    document.addEventListener("pointerdown", closeOnOutsidePress, true);
+    return () => document.removeEventListener("pointerdown", closeOnOutsidePress, true);
+  }, [showQr]);
 
   async function copyInvite() {
     await navigator.clipboard.writeText(inviteUrl);
@@ -39,7 +52,7 @@ export default function ShareRoom({ roomId }) {
   }
 
   return (
-    <div className="relative flex items-center gap-1.5 sm:gap-2">
+    <div ref={rootRef} className="relative flex items-center gap-1.5 sm:gap-2">
       <button
         type="button"
         onClick={copyInvite}

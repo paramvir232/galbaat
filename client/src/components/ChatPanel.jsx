@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import DOMPurify from "dompurify";
-import { Check, Download, Edit3, Eye, File as FileIcon, Loader2, Mic, Minus, Plus, RotateCcw, Send, Smile, Square, Trash2, UserRound, UsersRound, X } from "lucide-react";
+import { Check, Copy, Download, Edit3, Eye, File as FileIcon, Loader2, Mic, Minus, Plus, RotateCcw, Send, Smile, Square, Trash2, UserRound, UsersRound, X } from "lucide-react";
 import { apiAssetUrl } from "../lib/api";
 import { formatTime } from "../lib/time";
 
@@ -296,6 +296,7 @@ export default function ChatPanel({
   const endRef = useRef(null);
   const inputRef = useRef(null);
   const fileInputRef = useRef(null);
+  const composerRef = useRef(null);
   const typingTimer = useRef(null);
   const recorderRef = useRef(null);
   const voiceStreamRef = useRef(null);
@@ -342,6 +343,15 @@ export default function ChatPanel({
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [attachmentPreview]);
+
+  useEffect(() => {
+    if (!showEmojis) return undefined;
+    const closeOnOutsidePress = (event) => {
+      if (!composerRef.current?.contains(event.target)) setShowEmojis(false);
+    };
+    document.addEventListener("pointerdown", closeOnOutsidePress, true);
+    return () => document.removeEventListener("pointerdown", closeOnOutsidePress, true);
+  }, [showEmojis]);
 
   useEffect(() => {
     if (!attachmentPreview || (attachmentPreview.type !== "pdf" && attachmentPreview.type !== "text")) {
@@ -795,6 +805,23 @@ export default function ChatPanel({
     changeImageZoom(event.deltaY < 0 ? 0.2 : -0.2);
   }
 
+  async function copyMessageText(message) {
+    const text = String(message?.message || "").trim();
+    if (!text) return;
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch {
+      const input = document.createElement("textarea");
+      input.value = text;
+      input.style.position = "fixed";
+      input.style.opacity = "0";
+      document.body.appendChild(input);
+      input.select();
+      document.execCommand("copy");
+      input.remove();
+    }
+  }
+
   const mentionOptions = mention
     ? (() => {
         const selfParticipant = participants.find((participant) => participant.username === currentUsername);
@@ -836,13 +863,13 @@ export default function ChatPanel({
           return (
             <div
               key={message.id || `${message.username}-${message.timestamp}`}
-              className={`flex ${isSystem ? "justify-center" : isOwn ? "justify-end" : "justify-start"} ${visibleReactions.length ? "mb-4" : ""}`}
-            >
-            <div
               onMouseEnter={() => {
                 if (reactionAllowed) setReactionPickerId(message.id);
               }}
               onMouseLeave={() => setReactionPickerId((id) => (id === message.id ? null : id))}
+              className={`flex flex-col ${isSystem ? "items-center" : isOwn ? "items-end" : "items-start"}`}
+            >
+            <div
               className={`group relative w-fit min-w-0 max-w-[92%] rounded-[18px] border px-3 py-1.5 shadow-sm sm:max-w-[82%] ${
                 isSystem
                   ? "border-transparent bg-white/[0.03] text-center"
@@ -932,9 +959,10 @@ export default function ChatPanel({
                   )}
                 </>
               )}
-              {visibleReactions.length > 0 && (
-                <div className={`absolute -bottom-3 flex max-w-[calc(100%-1.5rem)] flex-wrap gap-1 ${isOwn ? "right-3 justify-end" : "left-3 justify-start"}`}>
-                  {visibleReactions.map(([emoji, count]) => (
+            </div>
+            {visibleReactions.length > 0 && (
+              <div className="mt-1 flex max-w-[92%] flex-wrap gap-1">
+                {visibleReactions.map(([emoji, count]) => (
                   <button
                     key={emoji}
                     type="button"
@@ -944,32 +972,41 @@ export default function ChatPanel({
                     <span>{emoji}</span>
                     {count > 1 && <span className="text-[11px] font-semibold text-slate-300">{count}</span>}
                   </button>
-                  ))}
-                </div>
-              )}
-              {reactionPickerId === message.id && (
-              <div className={`absolute -bottom-4 z-20 flex rounded-full border border-line bg-panel/95 p-1 shadow-xl ${isOwn ? "right-3" : "left-3"}`}>
+                ))}
+              </div>
+            )}
+            {reactionPickerId === message.id && (
+              <div className="mt-1 flex items-center rounded-full border border-line bg-panel/95 p-1 shadow-xl">
+                {message.message && (
+                  <button
+                    type="button"
+                    onClick={() => copyMessageText(message)}
+                    className="grid h-8 w-8 place-items-center rounded-full text-slate-300 hover:bg-white/10 hover:text-white"
+                    title="Copy message"
+                  >
+                    <Copy className="h-3.5 w-3.5" />
+                  </button>
+                )}
                 {REACTION_OPTIONS.map((emoji) => (
                   <button
                     key={emoji}
                     type="button"
                     onClick={() => reactToMessage(message.id, emoji)}
                     className="grid h-8 w-8 place-items-center rounded-full text-sm hover:bg-white/10"
-                    title="React"
+                    title={`React ${emoji}`}
                   >
                     {emoji}
                   </button>
                 ))}
               </div>
-              )}
-            </div>
+            )}
             </div>
           );
         })}
         <div ref={endRef} />
       </div>
 
-      <form onSubmit={submit} onPaste={handlePaste} className="relative shrink-0 border-t border-line p-3 sm:p-4">
+      <form ref={composerRef} onSubmit={submit} onPaste={handlePaste} className="relative shrink-0 border-t border-line p-3 sm:p-4">
         {showEmojis && (
           <div className="absolute bottom-16 left-2.5 z-20 grid grid-cols-5 gap-1 rounded-lg border border-line bg-panel p-2 shadow-2xl sm:left-3">
             {EMOJIS.map((emoji) => (

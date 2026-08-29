@@ -325,6 +325,7 @@ export default function Whiteboard({ open, roomId, socket, currentUser, particip
   const lastElementSyncRef = useRef(0);
   const saveTimerRef = useRef(null);
   const textEditorRef = useRef(null);
+  const exportMenuRef = useRef(null);
   const [tool, setTool] = useState("select");
   const [elements, setElements] = useState([]);
   const [selectedIds, setSelectedIds] = useState([]);
@@ -375,6 +376,15 @@ export default function Whiteboard({ open, roomId, socket, currentUser, particip
     if (!textEditor) return;
     window.requestAnimationFrame(() => textEditorRef.current?.focus());
   }, [textEditor]);
+
+  useEffect(() => {
+    if (!exportMenuOpen) return undefined;
+    const closeOnOutsidePress = (event) => {
+      if (!exportMenuRef.current?.contains(event.target)) setExportMenuOpen(false);
+    };
+    document.addEventListener("pointerdown", closeOnOutsidePress, true);
+    return () => document.removeEventListener("pointerdown", closeOnOutsidePress, true);
+  }, [exportMenuOpen]);
 
   const emitBoard = useCallback((nextElements = elementsRef.current, nextBackground = backgroundRef.current) => {
     if (!open || !canEditBoard) return;
@@ -1166,7 +1176,7 @@ export default function Whiteboard({ open, roomId, socket, currentUser, particip
           </button>
         </div>
         <div className="flex items-center gap-2">
-          <div className="relative">
+          <div ref={exportMenuRef} className="relative">
             <button
               type="button"
               onClick={() => setExportMenuOpen((openMenu) => !openMenu)}

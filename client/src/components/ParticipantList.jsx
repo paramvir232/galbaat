@@ -1,11 +1,21 @@
 import { Crown, Hand, Mic, MicOff, Music, PanelLeftClose, Radio, ScreenShare, ShieldX, Signal, UserX, Video, Volume2 } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 export default function ParticipantList({ participants, selfId, isHost = false, peerVolumes = {}, onPeerVolumeChange, onCollapse, onSelfMute, onHostMute, onKick }) {
   const [openVolumeId, setOpenVolumeId] = useState(null);
+  const listRef = useRef(null);
+
+  useEffect(() => {
+    if (!openVolumeId) return undefined;
+    const closeOnOutsidePress = (event) => {
+      if (!listRef.current?.contains(event.target)) setOpenVolumeId(null);
+    };
+    document.addEventListener("pointerdown", closeOnOutsidePress, true);
+    return () => document.removeEventListener("pointerdown", closeOnOutsidePress, true);
+  }, [openVolumeId]);
 
   return (
-    <aside className="apple-surface flex h-full min-h-0 flex-col rounded-xl p-3 sm:p-4">
+    <aside ref={listRef} className="apple-surface flex h-full min-h-0 flex-col rounded-xl p-3 sm:p-4">
       <div className="mb-3 flex items-center justify-between gap-2 sm:mb-4">
         <h2 className="text-sm font-semibold text-slate-100">Participants</h2>
         <div className="flex items-center gap-1.5">

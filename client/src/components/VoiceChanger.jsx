@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Mic2, X } from "lucide-react";
 
 const EFFECTS = [
@@ -19,6 +19,16 @@ export default function VoiceChanger({ effect, onChange, disabled = false }) {
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const popoverRef = useRef(null);
+
+  useEffect(() => {
+    if (!open) return undefined;
+    const closeOnOutsidePress = (event) => {
+      if (!popoverRef.current?.contains(event.target)) setOpen(false);
+    };
+    document.addEventListener("pointerdown", closeOnOutsidePress, true);
+    return () => document.removeEventListener("pointerdown", closeOnOutsidePress, true);
+  }, [open]);
 
   async function chooseEffect(nextEffect) {
     if (busy || nextEffect === effect) return;
@@ -35,7 +45,7 @@ export default function VoiceChanger({ effect, onChange, disabled = false }) {
   }
 
   return (
-    <div className="relative">
+    <div ref={popoverRef} className="relative">
       <button
         type="button"
         disabled={disabled}
